@@ -1,65 +1,126 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Image from 'next/image'
+import { supabase } from '@/lib/supabase'
+
+export default function LoginPage() {
+  const router = useRouter()
+  const [employeeId, setEmployeeId] = useState('')
+  const [idCard, setIdCard] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+
+    try {
+      const { data, error: dbError } = await supabase
+        .from('employees')
+        .select('id, employee_id, name, role')
+        .eq('employee_id', employeeId.trim())
+        .eq('id_card', idCard.trim())
+        .single()
+
+      if (dbError || !data) {
+        setError('รหัสพนักงานหรือเลขบัตรประชาชนไม่ถูกต้อง')
+        setLoading(false)
+        return
+      }
+
+      localStorage.setItem('employee', JSON.stringify(data))
+
+      const role = data.role?.toLowerCase()
+      if (role === 'admin') {
+        router.push('/admin')
+      } else if (role === 'hr') {
+        router.push('/hr')
+      } else {
+        router.push('/select') // <-- เดิมคือ /dashboard เปลี่ยนมาที่หน้าเลือกฝั่ง
+      }
+    } catch {
+      setError('เกิดข้อผิดพลาด กรุณาลองใหม่')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <main className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="w-full max-w-md">
+        <div className="bg-white rounded-2xl shadow-lg px-10 py-12">
+          <div className="flex justify-center mb-8">
+            <Image src="/logo.png" alt="R8M Group" width={100} height={100} priority />
+          </div>
+
+          <h1 className="text-2xl font-semibold text-center text-gray-800 mb-1">
+            เข้าสู่ระบบ
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="text-sm text-center text-gray-400 mb-8">
+            R8M Group Employee Portal
           </p>
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label className="block text-sm font-medium text-gray-600 mb-1">
+                รหัสพนักงาน
+              </label>
+              <input
+                type="text"
+                value={employeeId}
+                onChange={(e) => setEmployeeId(e.target.value)}
+                placeholder="เช่น SDO0586"
+                required
+                className="w-full px-4 py-3 rounded-xl border border-gray-200
+                           focus:outline-none focus:ring-2 focus:ring-[#3B9EE8]
+                           focus:border-transparent text-gray-800 placeholder-gray-300
+                           transition"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-600 mb-1">
+                เลขบัตรประชาชน
+              </label>
+              <input
+                type="password"
+                value={idCard}
+                onChange={(e) => setIdCard(e.target.value)}
+                placeholder="กรอกเลข 13 หลัก"
+                required
+                maxLength={13}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200
+                           focus:outline-none focus:ring-2 focus:ring-[#3B9EE8]
+                           focus:border-transparent text-gray-800 placeholder-gray-300
+                           transition"
+              />
+            </div>
+
+            {error && (
+              <p className="text-sm text-red-500 text-center bg-red-50 py-2 px-4 rounded-lg">
+                {error}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 rounded-xl bg-[#3B9EE8] hover:bg-[#2b8fd8]
+                         text-white font-semibold text-base transition
+                         disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}
+            </button>
+          </form>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+
+        <p className="text-center text-xs text-gray-300 mt-6">
+          © 2025 R8M Group. All rights reserved.
+        </p>
+      </div>
+    </main>
+  )
 }
