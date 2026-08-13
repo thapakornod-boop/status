@@ -3,6 +3,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { TOTAL_STEPS } from '@/lib/caseSteps'
+import {
+  FaArrowLeft,
+  FaArrowRight,
+  FaBoxOpen,
+  FaBuilding,
+  FaCheckCircle,
+  FaClipboardList,
+  FaClock,
+  FaSearch,
+  FaStore,
+  FaTruck,
+  FaPlus,
+  FaTimesCircle,
+  FaChevronRight,
+} from 'react-icons/fa'
 
 type Store = {
   id: string
@@ -42,28 +58,30 @@ type CaseRow = {
   transport_companies?: { name: string } | null
 }
 
-// เคสที่ทำค้างไว้ของร้านที่เลือก (ยังไม่ completed)
 type PendingCase = {
   id: string
   case_number: string | null
   current_step: number
 }
 
-// ตั้งค่าความต่างของแต่ละเคสไว้ที่เดียว เพิ่ม/แก้ทีหลังง่าย
 const CASE_CONFIG = {
   sales: {
     label: 'เซลล์',
     table: 'case1_sales_pickup',
-    totalSteps: 7,
+    totalSteps: TOTAL_STEPS.sales,
     accent: '#3B9EE8',
     hasTransport: false,
+    icon: FaStore,
+    description: 'รับของเสียจากร้านค้าโดยเซลล์',
   },
   transport: {
     label: 'ขนส่ง',
     table: 'case2_transport_pickup',
-    totalSteps: 12,
+    totalSteps: TOTAL_STEPS.transport,
     accent: '#F2994A',
     hasTransport: true,
+    icon: FaTruck,
+    description: 'รับของเสียผ่านบริษัทขนส่ง',
   },
 } as const
 
@@ -72,10 +90,12 @@ type CaseType = keyof typeof CASE_CONFIG
 export default function CasePage() {
   const params = useParams<{ type: string }>()
   const router = useRouter()
+
   const type = params.type as CaseType
   const config = CASE_CONFIG[type]
+  const Icon = config?.icon ?? FaBoxOpen
 
-  const [tab, setTab] = useState<'form' | 'status'>('form') // ฟอร์มขึ้นก่อนเสมอ
+  const [tab, setTab] = useState<'form' | 'status'>('form')
 
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [myCases, setMyCases] = useState<MyCase[]>([])
@@ -95,25 +115,31 @@ export default function CasePage() {
   const [pendingCase, setPendingCase] = useState<PendingCase | null>(null)
   const [checkingPending, setCheckingPending] = useState(false)
 
-  // เผื่อ type ใน url ไม่ถูกต้อง เช่น /case/foo
   useEffect(() => {
     if (!config) router.push('/select')
   }, [config, router])
 
-  // อ่าน employee จาก localStorage (เก็บตอน login)
   useEffect(() => {
     const raw = localStorage.getItem('employee')
+
     if (!raw) {
       router.push('/login')
       return
     }
-    setEmployee(JSON.parse(raw))
+
+    try {
+      setEmployee(JSON.parse(raw))
+    } catch {
+      localStorage.removeItem('employee')
+      router.push('/login')
+    }
   }, [router])
 
-  // ดึงเคสของตัวเองที่ยังไม่ completed มาทำ dropdown
   useEffect(() => {
     if (!config || !employee?.id) return
+
     setLoadingMyCases(true)
+
     supabase
       .from(config.table)
       .select('id, case_number, current_step, stores(store_code, store_name)')
@@ -126,9 +152,9 @@ export default function CasePage() {
       })
   }, [config, employee])
 
-  // โหลด store dropdown (+ transport company ถ้าจำเป็น)
   useEffect(() => {
     if (!config) return
+
     supabase
       .from('stores')
       .select('id, store_code, store_name, seller_code')
@@ -144,10 +170,11 @@ export default function CasePage() {
     }
   }, [config])
 
-  // โหลดรายการสถานะเมื่อสลับไปแท็บ "สถานะ"
   useEffect(() => {
     if (!config || tab !== 'status') return
+
     setLoadingRows(true)
+
     const selectStr = config.hasTransport
       ? 'id, case_number, current_step, status, cancelled_reason, cn_usage_status, created_at, stores(store_code, store_name), transport_companies(name)'
       : 'id, case_number, current_step, status, cancelled_reason, cn_usage_status, created_at, stores(store_code, store_name)'
@@ -162,12 +189,13 @@ export default function CasePage() {
       })
   }, [tab, config])
 
-  // พอเลือกร้านค้าปุ๊บ เช็คว่าร้านนี้มีเคสทำค้างไว้ (ยังไม่ completed) อยู่ไหม
   useEffect(() => {
     setPendingCase(null)
+
     if (!config || !selectedStoreId) return
 
     setCheckingPending(true)
+
     supabase
       .from(config.table)
       .select('id, case_number, current_step')
@@ -184,6 +212,9 @@ export default function CasePage() {
 
   const handleSearchCaseNumber = async () => {
     if (!config || !searchNumber.trim()) return
+
+    setCreateError('')
+
     const { data } = await supabase
       .from(config.table)
       .select('id')
@@ -202,23 +233,42 @@ export default function CasePage() {
     [stores, selectedStoreId]
   )
 
+  const stats = useMemo(() => {
+    const active = rows.filter((r) => r.status === 'in_progress').length
+    const completed = rows.filter((r) => r.status === 'completed').length
+    const cancelled = rows.filter((r) => r.status === 'cancelled').length
+
+    return {
+      total: rows.length,
+      active,
+      completed,
+      cancelled,
+    }
+  }, [rows])
+
   const handleCreate = async () => {
     setCreateError('')
+
     if (!selectedStoreId) {
       setCreateError('กรุณาเลือกร้านค้าก่อนครับ')
       return
     }
+
     if (config.hasTransport && !selectedTransportId) {
       setCreateError('กรุณาเลือกขนส่งก่อนครับ')
       return
     }
 
     setCreating(true)
+
     const payload: Record<string, unknown> = {
       store_id: selectedStoreId,
       created_by_employee_id: employee?.id ?? null,
     }
-    if (config.hasTransport) payload.transport_id = selectedTransportId
+
+    if (config.hasTransport) {
+      payload.transport_id = selectedTransportId
+    }
 
     const { data, error } = await supabase
       .from(config.table)
@@ -233,260 +283,977 @@ export default function CasePage() {
       return
     }
 
-    // ไปหน้าฟอร์ม step ถัดไปของ record นี้ (ทำต่อในสเต็ปถัดไป)
     router.push(`/case/${type}/${data.id}`)
   }
 
   if (!config) return null
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      {/* Top bar */}
-      <div className="bg-white border-b border-gray-100 px-4 sm:px-8 py-4 flex items-center gap-3">
-        <button
-          onClick={() => router.push('/select')}
-          className="text-gray-400 hover:text-gray-600 transition text-xl leading-none"
-        >
-          ←
-        </button>
-        <div>
-          <p className="text-xs text-gray-400">ฝั่ง</p>
-          <p className="font-semibold" style={{ color: config.accent }}>
-            {config.label}
-          </p>
-        </div>
+    <main className="relative min-h-screen overflow-hidden bg-[#f5f8fc]">
+
+      {/* Background */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div
+          className="absolute -top-40 -left-40 h-[450px] w-[450px] rounded-full blur-3xl opacity-40"
+          style={{ backgroundColor: `${config.accent}18` }}
+        />
+
+        <div className="absolute -bottom-40 -right-40 h-[500px] w-[500px] rounded-full bg-slate-200/40 blur-3xl" />
+
+        <div
+          className="
+            absolute inset-0 opacity-[0.025]
+            [background-image:linear-gradient(#64748b_1px,transparent_1px),linear-gradient(90deg,#64748b_1px,transparent_1px)]
+            [background-size:40px_40px]
+          "
+        />
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 sm:px-0 py-8">
-        {/* Toggle */}
-        <div className="flex bg-white rounded-xl border border-gray-200 p-1 mb-6 w-fit mx-auto">
-          <button
-            onClick={() => setTab('form')}
-            className={`px-6 py-2 rounded-lg text-sm font-medium transition ${
-              tab === 'form' ? 'text-white' : 'text-gray-500'
-            }`}
-            style={tab === 'form' ? { backgroundColor: config.accent } : {}}
-          >
-            ฟอร์ม
-          </button>
-          <button
-            onClick={() => setTab('status')}
-            className={`px-6 py-2 rounded-lg text-sm font-medium transition ${
-              tab === 'status' ? 'text-white' : 'text-gray-500'
-            }`}
-            style={tab === 'status' ? { backgroundColor: config.accent } : {}}
-          >
-            สถานะ
-          </button>
-        </div>
+      {/* Header */}
+      <header className="relative z-10 border-b border-white/60 bg-white/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
 
-        {tab === 'form' ? (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-8">
-            {/* เคสของฉันที่ทำค้างไว้ */}
-            {!loadingMyCases && myCases.length > 0 && (
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-600 mb-1">
-                  เคสของฉันที่ทำค้างไว้ ({myCases.length})
-                </label>
-                <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    if (e.target.value) router.push(`/case/${type}/${e.target.value}`)
-                  }}
-                  className="w-full px-4 py-3 rounded-xl border-2 text-gray-800"
-                  style={{ borderColor: config.accent }}
-                >
-                  <option value="">-- เลือกเคสเพื่อทำต่อ --</option>
-                  {myCases.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.case_number ?? '(ไม่มีเลขเคส)'} · {c.stores?.store_name ?? '-'} · ขั้นตอน{' '}
-                      {c.current_step}/{config.totalSteps}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* ค้นหาเคสเก่าด้วยเลขเคส */}
-            <div className="flex gap-2 mb-6">
-              <input
-                type="text"
-                value={searchNumber}
-                onChange={(e) => setSearchNumber(e.target.value)}
-                placeholder="ค้นหาด้วยเลขเคส เช่น SL-202608-0001"
-                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm
-                           focus:outline-none focus:ring-2 focus:ring-gray-300"
-              />
-              <button
-                onClick={handleSearchCaseNumber}
-                className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 font-medium"
-              >
-                ค้นหา
-              </button>
-            </div>
-
-            <p className="text-xs text-gray-400 mb-1">ขั้นตอนที่ 1 / {config.totalSteps}</p>
-            <h2 className="text-lg font-semibold text-gray-800 mb-6">เลือกร้านค้า</h2>
-
-            <label className="block text-sm font-medium text-gray-600 mb-1">รหัสร้านค้า</label>
-            <select
-              value={selectedStoreId}
-              onChange={(e) => setSelectedStoreId(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none
-                         focus:ring-2 focus:ring-[#3B9EE8] focus:border-transparent text-gray-800 mb-4"
-            >
-              <option value="">-- เลือกรหัสร้านค้า --</option>
-              {stores.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.store_code} — {s.store_name}
-                </option>
-              ))}
-            </select>
-
-            {selectedStore && (
-              <div className="text-sm text-gray-500 bg-gray-50 rounded-xl px-4 py-3 mb-4 space-y-1">
-                <p>ชื่อร้านค้า: {selectedStore.store_name}</p>
-                <p>Seller code: {selectedStore.seller_code || '-'}</p>
-              </div>
-            )}
-
-            {checkingPending && (
-              <p className="text-xs text-gray-400 mb-4">กำลังเช็คเคสค้าง...</p>
-            )}
-
-            {pendingCase && (
-              <div className="rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3 mb-4">
-                <p className="text-sm font-medium text-amber-800">
-                  ⚠️ ร้านนี้มีเคสทำค้างอยู่ ({pendingCase.case_number ?? '—'})
-                </p>
-                <p className="text-xs text-amber-700 mt-0.5">
-                  อยู่ที่ขั้นตอน {pendingCase.current_step} / {config.totalSteps} — ทำต่อได้เลย ไม่ต้องสร้างเคสใหม่
-                </p>
-                <button
-                  onClick={() => router.push(`/case/${type}/${pendingCase.id}`)}
-                  className="mt-2 text-sm font-semibold text-amber-800 underline"
-                >
-                  ทำเคสนี้ต่อ →
-                </button>
-              </div>
-            )}
-
-            {config.hasTransport && (
-              <>
-                <label className="block text-sm font-medium text-gray-600 mb-1">ชื่อขนส่ง</label>
-                <select
-                  value={selectedTransportId}
-                  onChange={(e) => setSelectedTransportId(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none
-                             focus:ring-2 focus:ring-[#F2994A] focus:border-transparent text-gray-800 mb-4"
-                >
-                  <option value="">-- เลือกขนส่ง --</option>
-                  {transports.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
-
-            {createError && (
-              <p className="text-sm text-red-500 text-center bg-red-50 py-2 px-4 rounded-lg mb-4">
-                {createError}
-              </p>
-            )}
+          <div className="flex items-center gap-3">
 
             <button
-              onClick={handleCreate}
-              disabled={creating}
-              className="w-full py-3 rounded-xl text-white font-semibold transition disabled:opacity-60"
-              style={{ backgroundColor: config.accent }}
+              onClick={() => router.push('/select')}
+              className="
+                flex h-10 w-10 items-center justify-center
+                rounded-xl border border-gray-200
+                bg-white text-gray-500
+                shadow-sm transition
+                hover:-translate-x-0.5 hover:border-gray-300 hover:text-gray-800
+              "
             >
-              {creating
-                ? 'กำลังสร้างรายการ...'
-                : pendingCase
-                ? 'สร้างเคสใหม่แยกต่างหาก'
-                : 'เริ่มทำรายการ'}
+              <FaArrowLeft size={14} />
+            </button>
+
+            <div
+              className="
+                flex h-11 w-11 items-center justify-center
+                rounded-2xl text-white shadow-lg
+              "
+              style={{
+                background: `linear-gradient(135deg, ${config.accent}, ${config.accent}cc)`,
+                boxShadow: `0 10px 30px ${config.accent}30`,
+              }}
+            >
+              <Icon size={20} />
+            </div>
+
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-gray-400">
+                Waste Collection
+              </p>
+
+              <h1 className="text-base font-bold text-gray-800 sm:text-lg">
+                {config.label}
+              </h1>
+            </div>
+          </div>
+
+          {employee && (
+            <div className="hidden items-center gap-3 sm:flex">
+              <div className="text-right">
+                <p className="text-xs font-semibold text-gray-700">
+                  {employee.name}
+                </p>
+                <p className="text-[10px] text-gray-400">
+                  {employee.employee_id}
+                </p>
+              </div>
+
+              <div
+                className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold text-white"
+                style={{ backgroundColor: config.accent }}
+              >
+                {employee.name?.charAt(0) ?? '?'}
+              </div>
+            </div>
+          )}
+
+        </div>
+      </header>
+
+      <div className="relative z-10 mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+
+        {/* Hero */}
+        <div className="mb-6 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+
+          <div>
+            <div
+              className="mb-2 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold"
+              style={{
+                color: config.accent,
+                backgroundColor: `${config.accent}12`,
+              }}
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: config.accent }}
+              />
+              {config.description}
+            </div>
+
+            <h2 className="text-2xl font-bold tracking-tight text-gray-800 sm:text-3xl">
+              จัดการรายการรับของเสีย
+            </h2>
+
+            <p className="mt-1 text-sm text-gray-400">
+              สร้างเคสใหม่ ทำรายการต่อ หรือดูสถานะย้อนหลัง
+            </p>
+          </div>
+
+          {/* Tab */}
+          <div className="flex rounded-2xl border border-gray-200/80 bg-white/80 p-1.5 shadow-sm backdrop-blur">
+            <button
+              onClick={() => setTab('form')}
+              className={`
+                flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+                transition-all duration-300
+                ${tab === 'form'
+                  ? 'text-white shadow-md'
+                  : 'text-gray-400 hover:bg-gray-50 hover:text-gray-700'}
+              `}
+              style={tab === 'form' ? { backgroundColor: config.accent } : {}}
+            >
+              <FaPlus size={12} />
+              สร้างรายการ
+            </button>
+
+            <button
+              onClick={() => setTab('status')}
+              className={`
+                flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+                transition-all duration-300
+                ${tab === 'status'
+                  ? 'text-white shadow-md'
+                  : 'text-gray-400 hover:bg-gray-50 hover:text-gray-700'}
+              `}
+              style={tab === 'status' ? { backgroundColor: config.accent } : {}}
+            >
+              <FaClipboardList size={12} />
+              สถานะ
             </button>
           </div>
-        ) : (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            {loadingRows ? (
-              <p className="text-center text-gray-400 py-10 text-sm">กำลังโหลด...</p>
-            ) : rows.length === 0 ? (
-              <p className="text-center text-gray-400 py-10 text-sm">ยังไม่มีรายการ</p>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 text-left text-gray-400">
-                    <th className="px-4 py-3 font-medium">เลขเคส</th>
-                    <th className="px-4 py-3 font-medium">รหัสร้านค้า</th>
-                    <th className="px-4 py-3 font-medium">ร้านค้า</th>
-                    {config.hasTransport && <th className="px-4 py-3 font-medium">ขนส่ง</th>}
-                    <th className="px-4 py-3 font-medium">ขั้นตอน</th>
-                    <th className="px-4 py-3 font-medium">สถานะ</th>
-                    <th className="px-4 py-3 font-medium">สถานะ CN</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr
-                      key={r.id}
-                      onClick={() => router.push(`/case/${type}/${r.id}`)}
-                      className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 cursor-pointer ${
-                        r.status === 'cancelled' ? 'opacity-50' : ''
-                      }`}
-                    >
-                      <td className="px-4 py-3 text-gray-700 font-mono text-xs">
-                        {r.case_number ?? '-'}
-                      </td>
-                      <td className="px-4 py-3 text-gray-700">{r.stores?.store_code}</td>
-                      <td className="px-4 py-3 text-gray-700">{r.stores?.store_name}</td>
-                      {config.hasTransport && (
-                        <td className="px-4 py-3 text-gray-700">
-                          {r.transport_companies?.name ?? '-'}
-                        </td>
-                      )}
-                      <td className="px-4 py-3 text-gray-700">
-                        {r.current_step} / {config.totalSteps}
-                      </td>
-                      <td className="px-4 py-3">
-                        {r.status === 'cancelled' ? (
-                          <span
-                            className="text-xs px-2 py-1 rounded-full bg-red-50 text-red-500"
-                            title={r.cancelled_reason ?? ''}
-                          >
-                            ยกเลิก
-                          </span>
-                        ) : r.status === 'completed' ? (
-                          <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-600">
-                            เสร็จสิ้น
-                          </span>
-                        ) : (
-                          <span className="text-xs px-2 py-1 rounded-full bg-blue-50 text-blue-600">
-                            กำลังทำ
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`text-xs px-2 py-1 rounded-full ${
-                            r.cn_usage_status === 'มีการนำมาใช้แล้ว'
-                              ? 'bg-green-50 text-green-600'
-                              : 'bg-yellow-50 text-yellow-600'
-                          }`}
-                        >
-                          {r.cn_usage_status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+
+        </div>
+
+        {/* Stats */}
+        {tab === 'status' && (
+          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+
+            <StatCard
+              icon={<FaClipboardList />}
+              label="ทั้งหมด"
+              value={stats.total}
+              accent={config.accent}
+            />
+
+            <StatCard
+              icon={<FaClock />}
+              label="กำลังทำ"
+              value={stats.active}
+              accent="#3B9EE8"
+            />
+
+            <StatCard
+              icon={<FaCheckCircle />}
+              label="เสร็จแล้ว"
+              value={stats.completed}
+              accent="#22c55e"
+            />
+
+            <StatCard
+              icon={<FaTimesCircle />}
+              label="ยกเลิก"
+              value={stats.cancelled}
+              accent="#ef4444"
+            />
+
           </div>
         )}
+
+        {tab === 'form' ? (
+
+          <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
+
+            {/* Main form */}
+            <section className="overflow-hidden rounded-3xl border border-white/80 bg-white/90 shadow-[0_20px_60px_-35px_rgba(15,23,42,0.35)] backdrop-blur">
+
+              <div
+                className="h-1.5 w-full"
+                style={{
+                  background: `linear-gradient(90deg, ${config.accent}, ${config.accent}55)`,
+                }}
+              />
+
+              <div className="p-5 sm:p-7">
+
+                {/* Continue cases */}
+                {!loadingMyCases && myCases.length > 0 && (
+                  <div className="mb-7">
+
+                    <div className="mb-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-gray-800">
+                          ทำเคสต่อ
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          มี {myCases.length} เคสที่คุณกำลังดำเนินการ
+                        </p>
+                      </div>
+
+                      <span
+                        className="rounded-full px-2.5 py-1 text-[10px] font-bold"
+                        style={{
+                          color: config.accent,
+                          backgroundColor: `${config.accent}12`,
+                        }}
+                      >
+                        {myCases.length} เคส
+                      </span>
+                    </div>
+
+                    <div className="relative">
+                      <select
+                        defaultValue=""
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            router.push(`/case/${type}/${e.target.value}`)
+                          }
+                        }}
+                        className="
+                          w-full appearance-none rounded-2xl
+                          border border-gray-200 bg-gray-50
+                          px-4 py-3.5 pr-10 text-sm text-gray-700
+                          outline-none transition
+                          focus:bg-white
+                        "
+                        style={{
+                          boxShadow: `0 0 0 2px ${config.accent}00`,
+                        }}
+                      >
+                        <option value="">
+                          -- เลือกเคสเพื่อทำต่อ --
+                        </option>
+
+                        {myCases.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.case_number ?? '(ไม่มีเลขเคส)'} ·{' '}
+                            {c.stores?.store_name ?? '-'} · ขั้นตอน{' '}
+                            {c.current_step}/{config.totalSteps}
+                          </option>
+                        ))}
+                      </select>
+
+                      <FaChevronRight
+                        className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 rotate-90 text-gray-300"
+                        size={12}
+                      />
+                    </div>
+
+                  </div>
+                )}
+
+                {/* Search */}
+                <div className="mb-7">
+                  <div className="mb-3">
+                    <p className="text-sm font-bold text-gray-800">
+                      ค้นหาเคส
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      ใช้เลขเคสเพื่อเปิดรายการที่มีอยู่
+                    </p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <FaSearch
+                        className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300"
+                        size={14}
+                      />
+
+                      <input
+                        type="text"
+                        value={searchNumber}
+                        onChange={(e) => setSearchNumber(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSearchCaseNumber()
+                          }
+                        }}
+                        placeholder="เช่น SL-202608-0001"
+                        className="
+                          w-full rounded-2xl border border-gray-200
+                          bg-gray-50 py-3.5 pl-11 pr-4 text-sm text-gray-800
+                          outline-none transition
+                          focus:border-gray-300 focus:bg-white
+                        "
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleSearchCaseNumber}
+                      className="
+                        rounded-2xl px-5 text-sm font-bold
+                        text-white shadow-sm transition
+                        hover:-translate-y-0.5 hover:shadow-md
+                        active:translate-y-0
+                      "
+                      style={{ backgroundColor: config.accent }}
+                    >
+                      ค้นหา
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mb-6 border-t border-gray-100 pt-7">
+
+                  {/* Step indicator */}
+                  <div className="mb-6 flex items-center gap-3">
+
+                    <div
+                      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-white shadow-lg"
+                      style={{
+                        backgroundColor: config.accent,
+                        boxShadow: `0 10px 25px ${config.accent}30`,
+                      }}
+                    >
+                      <FaStore size={19} />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="text-[10px] font-bold uppercase tracking-wider"
+                          style={{ color: config.accent }}
+                        >
+                          STEP 01
+                        </span>
+
+                        <span className="text-[10px] text-gray-300">
+                          / {config.totalSteps}
+                        </span>
+                      </div>
+
+                      <h3 className="text-lg font-bold text-gray-800">
+                        เลือกร้านค้า
+                      </h3>
+
+                      <p className="text-xs text-gray-400">
+                        เลือกร้านค้าที่ต้องการรับของเสีย
+                      </p>
+                    </div>
+
+                  </div>
+
+                  {/* Store select */}
+                  <div className="mb-5">
+
+                    <label className="mb-2 block text-xs font-bold text-gray-600">
+                      รหัสร้านค้า
+                      <span className="ml-1 text-red-400">*</span>
+                    </label>
+
+                    <div className="relative">
+                      <FaBuilding
+                        className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300"
+                        size={14}
+                      />
+
+                      <select
+                        value={selectedStoreId}
+                        onChange={(e) => setSelectedStoreId(e.target.value)}
+                        className="
+                          w-full appearance-none rounded-2xl
+                          border border-gray-200 bg-gray-50
+                          px-4 py-4 pl-11 pr-10
+                          text-sm text-gray-800 outline-none
+                          transition focus:bg-white
+                        "
+                      >
+                        <option value="">
+                          -- เลือกรหัสร้านค้า --
+                        </option>
+
+                        {stores.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.store_code} — {s.store_name}
+                          </option>
+                        ))}
+                      </select>
+
+                      <FaChevronRight
+                        className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 rotate-90 text-gray-300"
+                        size={12}
+                      />
+                    </div>
+
+                  </div>
+
+                  {/* Selected store */}
+                  {selectedStore && (
+                    <div
+                      className="mb-5 overflow-hidden rounded-2xl border p-4"
+                      style={{
+                        borderColor: `${config.accent}25`,
+                        backgroundColor: `${config.accent}08`,
+                      }}
+                    >
+                      <div className="flex items-start gap-3">
+
+                        <div
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                          style={{
+                            color: config.accent,
+                            backgroundColor: `${config.accent}15`,
+                          }}
+                        >
+                          <FaStore size={16} />
+                        </div>
+
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                            ร้านค้าที่เลือก
+                          </p>
+
+                          <p className="mt-0.5 truncate text-sm font-bold text-gray-800">
+                            {selectedStore.store_name}
+                          </p>
+
+                          <div className="mt-1 flex flex-wrap gap-2">
+                            <span className="rounded-md bg-white px-2 py-1 text-[10px] font-semibold text-gray-500">
+                              {selectedStore.store_code}
+                            </span>
+
+                            <span className="rounded-md bg-white px-2 py-1 text-[10px] text-gray-400">
+                              Seller: {selectedStore.seller_code || '-'}
+                            </span>
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pending */}
+                  {checkingPending && (
+                    <div className="mb-5 flex items-center gap-3 rounded-2xl bg-gray-50 px-4 py-3">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-200 border-t-gray-500" />
+                      <span className="text-xs text-gray-400">
+                        กำลังตรวจสอบเคสค้าง...
+                      </span>
+                    </div>
+                  )}
+
+                  {pendingCase && (
+                    <div className="mb-5 overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50">
+
+                      <div className="flex items-start gap-3 p-4">
+
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600">
+                          <FaClock size={16} />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-bold text-amber-900">
+                              มีเคสที่ยังดำเนินการอยู่
+                            </p>
+
+                            <span className="rounded-full bg-amber-200/70 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                              {pendingCase.case_number ?? 'ไม่มีเลขเคส'}
+                            </span>
+                          </div>
+
+                          <p className="mt-1 text-xs leading-relaxed text-amber-700">
+                            เคสนี้อยู่ที่ขั้นตอน {pendingCase.current_step} /{' '}
+                            {config.totalSteps} สามารถทำต่อได้เลย
+                          </p>
+
+                          <button
+                            onClick={() =>
+                              router.push(`/case/${type}/${pendingCase.id}`)
+                            }
+                            className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-amber-800 transition hover:gap-3"
+                          >
+                            ทำเคสนี้ต่อ
+                            <FaArrowRight size={10} />
+                          </button>
+                        </div>
+
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Transport */}
+                  {config.hasTransport && (
+                    <div className="mb-5">
+
+                      <label className="mb-2 block text-xs font-bold text-gray-600">
+                        บริษัทขนส่ง
+                        <span className="ml-1 text-red-400">*</span>
+                      </label>
+
+                      <div className="relative">
+                        <FaTruck
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300"
+                          size={14}
+                        />
+
+                        <select
+                          value={selectedTransportId}
+                          onChange={(e) => setSelectedTransportId(e.target.value)}
+                          className="
+                            w-full appearance-none rounded-2xl
+                            border border-gray-200 bg-gray-50
+                            px-4 py-4 pl-11 pr-10
+                            text-sm text-gray-800 outline-none
+                            transition focus:bg-white
+                          "
+                        >
+                          <option value="">
+                            -- เลือกขนส่ง --
+                          </option>
+
+                          {transports.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+
+                        <FaChevronRight
+                          className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 rotate-90 text-gray-300"
+                          size={12}
+                        />
+                      </div>
+
+                    </div>
+                  )}
+
+                  {createError && (
+                    <div className="mb-5 flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 p-4">
+                      <FaTimesCircle className="mt-0.5 shrink-0 text-red-400" />
+
+                      <p className="text-sm font-medium text-red-600">
+                        {createError}
+                      </p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleCreate}
+                    disabled={creating}
+                    className="
+                      group flex w-full items-center justify-center gap-3
+                      rounded-2xl py-4
+                      text-sm font-bold text-white
+                      shadow-lg transition-all duration-300
+                      hover:-translate-y-0.5 hover:shadow-xl
+                      disabled:cursor-not-allowed disabled:opacity-60
+                    "
+                    style={{
+                      background: `linear-gradient(135deg, ${config.accent}, ${config.accent}dd)`,
+                      boxShadow: `0 15px 35px ${config.accent}30`,
+                    }}
+                  >
+                    {creating ? (
+                      <>
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                        กำลังสร้างรายการ...
+                      </>
+                    ) : (
+                      <>
+                        <FaPlus size={12} />
+
+                        {pendingCase
+                          ? 'สร้างเคสใหม่แยกต่างหาก'
+                          : 'เริ่มทำรายการ'}
+
+                        <FaArrowRight
+                          className="transition-transform group-hover:translate-x-1"
+                          size={12}
+                        />
+                      </>
+                    )}
+                  </button>
+
+                </div>
+
+              </div>
+            </section>
+
+            {/* Side information */}
+            <aside className="space-y-4">
+
+              <div
+                className="relative overflow-hidden rounded-3xl p-6 text-white shadow-xl"
+                style={{
+                  background: `linear-gradient(145deg, ${config.accent}, ${config.accent}cc)`,
+                  boxShadow: `0 25px 60px ${config.accent}25`,
+                }}
+              >
+                <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full border-[25px] border-white/10" />
+                <div className="absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-white/5 blur-2xl" />
+
+                <div className="relative">
+                  <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15">
+                    <Icon size={22} />
+                  </div>
+
+                  <p className="text-xs font-medium text-white/70">
+                    WORKFLOW
+                  </p>
+
+                  <h3 className="mt-1 text-xl font-bold">
+                    {config.label}
+                  </h3>
+
+                  <p className="mt-2 text-sm leading-relaxed text-white/75">
+                    กระบวนการรับของเสียทั้งหมด {config.totalSteps} ขั้นตอน
+                    ตั้งแต่เลือกร้านค้าจนถึงการปิดเคส
+                  </p>
+
+                  <div className="mt-5 flex items-center gap-2">
+                    {Array.from({ length: config.totalSteps }).map((_, i) => (
+                      <div
+                        key={i}
+                        className="h-1.5 flex-1 rounded-full bg-white/20"
+                      />
+                    ))}
+                  </div>
+
+                  <p className="mt-2 text-[10px] text-white/60">
+                    STEP 01 → STEP {String(config.totalSteps).padStart(2, '0')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-gray-200/70 bg-white/80 p-5 shadow-sm backdrop-blur">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-100 text-gray-500">
+                    <FaClipboardList size={15} />
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-bold text-gray-800">
+                      คำแนะนำ
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      ก่อนเริ่มรายการ
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-3">
+
+                  {[
+                    'ตรวจสอบร้านค้าให้ถูกต้อง',
+                    'หากมีเคสค้าง ให้ทำเคสเดิมต่อ',
+                    'เตรียมรูปภาพหรือเอกสารที่เกี่ยวข้อง',
+                  ].map((text, index) => (
+                    <div
+                      key={index}
+                      className="flex items-start gap-3"
+                    >
+                      <div
+                        className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                        style={{ backgroundColor: config.accent }}
+                      >
+                        {index + 1}
+                      </div>
+
+                      <p className="text-xs leading-relaxed text-gray-500">
+                        {text}
+                      </p>
+                    </div>
+                  ))}
+
+                </div>
+              </div>
+
+            </aside>
+
+          </div>
+
+        ) : (
+
+          <section className="overflow-hidden rounded-3xl border border-white/80 bg-white/90 shadow-[0_20px_60px_-35px_rgba(15,23,42,0.35)] backdrop-blur">
+
+            <div className="border-b border-gray-100 px-5 py-5 sm:px-7">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">
+                    รายการทั้งหมด
+                  </h3>
+
+                  <p className="mt-1 text-xs text-gray-400">
+                    คลิกที่รายการเพื่อเปิดรายละเอียดและดำเนินการต่อ
+                  </p>
+                </div>
+
+                <div
+                  className="hidden h-11 w-11 items-center justify-center rounded-2xl sm:flex"
+                  style={{
+                    color: config.accent,
+                    backgroundColor: `${config.accent}10`,
+                  }}
+                >
+                  <ClipboardIcon />
+                </div>
+              </div>
+            </div>
+
+            {loadingRows ? (
+
+              <div className="space-y-3 p-5">
+                {[1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className="animate-pulse rounded-2xl border border-gray-100 p-5"
+                  >
+                    <div className="h-4 w-32 rounded bg-gray-100" />
+                    <div className="mt-3 h-3 w-56 rounded bg-gray-100" />
+                    <div className="mt-4 h-2 w-full rounded bg-gray-100" />
+                  </div>
+                ))}
+              </div>
+
+            ) : rows.length === 0 ? (
+
+              <div className="px-6 py-16 text-center">
+
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-gray-50 text-gray-300">
+                  <FaClipboardList size={25} />
+                </div>
+
+                <p className="mt-4 text-sm font-semibold text-gray-600">
+                  ยังไม่มีรายการ
+                </p>
+
+                <p className="mt-1 text-xs text-gray-400">
+                  เมื่อสร้างเคส รายการจะแสดงที่นี่
+                </p>
+
+              </div>
+
+            ) : (
+
+              <div className="divide-y divide-gray-100">
+
+                {rows.map((r) => (
+                  <CaseCard
+                    key={r.id}
+                    row={r}
+                    config={config}
+                    onClick={() => router.push(`/case/${type}/${r.id}`)}
+                  />
+                ))}
+
+              </div>
+
+            )}
+
+          </section>
+
+        )}
+
       </div>
+
     </main>
+  )
+}
+
+function StatCard({
+  icon,
+  label,
+  value,
+  accent,
+}: {
+  icon: React.ReactNode
+  label: string
+  value: number
+  accent: string
+}) {
+  return (
+    <div className="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-sm backdrop-blur">
+      <div className="flex items-center justify-between">
+        <div
+          className="flex h-9 w-9 items-center justify-center rounded-xl"
+          style={{
+            color: accent,
+            backgroundColor: `${accent}12`,
+          }}
+        >
+          {icon}
+        </div>
+
+        <span className="text-xl font-bold text-gray-800">
+          {value}
+        </span>
+      </div>
+
+      <p className="mt-3 text-[11px] font-medium text-gray-400">
+        {label}
+      </p>
+    </div>
+  )
+}
+
+function ClipboardIcon() {
+  return <FaClipboardList size={18} />
+}
+
+function CaseCard({
+  row,
+  config,
+  onClick,
+}: {
+  row: CaseRow
+  config: (typeof CASE_CONFIG)[CaseType]
+  onClick: () => void
+}) {
+  const isCancelled = row.status === 'cancelled'
+  const isCompleted = row.status === 'completed'
+
+  const progress = Math.min(
+    100,
+    Math.max(0, (row.current_step / config.totalSteps) * 100)
+  )
+
+  const statusConfig = isCancelled
+    ? {
+        label: 'ยกเลิก',
+        bg: 'bg-red-50',
+        text: 'text-red-500',
+        icon: <FaTimesCircle />,
+      }
+    : isCompleted
+      ? {
+          label: 'เสร็จสิ้น',
+          bg: 'bg-emerald-50',
+          text: 'text-emerald-600',
+          icon: <FaCheckCircle />,
+        }
+      : {
+          label: 'กำลังทำ',
+          bg: 'bg-blue-50',
+          text: 'text-blue-600',
+          icon: <FaClock />,
+        }
+
+  return (
+    <button
+      onClick={onClick}
+      className={`
+        group w-full text-left
+        p-5 sm:p-6
+        transition-all duration-300
+        hover:bg-gray-50/80
+        ${isCancelled ? 'opacity-60' : ''}
+      `}
+    >
+      <div className="flex items-start gap-4">
+
+        <div
+          className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-2xl sm:flex"
+          style={{
+            color: config.accent,
+            backgroundColor: `${config.accent}10`,
+          }}
+        >
+          <FaBoxOpen size={18} />
+        </div>
+
+        <div className="min-w-0 flex-1">
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-xs font-bold text-gray-700">
+              {row.case_number ?? '-'}
+            </span>
+
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold ${statusConfig.bg} ${statusConfig.text}`}
+            >
+              {statusConfig.icon}
+              {statusConfig.label}
+            </span>
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-sm font-bold text-gray-800">
+              {row.stores?.store_name ?? '-'}
+            </span>
+
+            <span className="text-xs text-gray-400">
+              {row.stores?.store_code ?? '-'}
+            </span>
+
+            {config.hasTransport && (
+              <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+                <FaTruck size={9} />
+                {row.transport_companies?.name ?? '-'}
+              </span>
+            )}
+          </div>
+
+          <div className="mt-4">
+
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[10px] font-medium text-gray-400">
+                ความคืบหน้า
+              </span>
+
+              <span
+                className="text-[10px] font-bold"
+                style={{ color: config.accent }}
+              >
+                ขั้นตอน {row.current_step}/{config.totalSteps}
+              </span>
+            </div>
+
+            <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${progress}%`,
+                  backgroundColor: isCancelled
+                    ? '#ef4444'
+                    : isCompleted
+                      ? '#22c55e'
+                      : config.accent,
+                }}
+              />
+            </div>
+
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+
+            <span className="rounded-lg bg-gray-50 px-2.5 py-1.5 text-[10px] text-gray-400">
+              CN:{' '}
+              <span className="font-semibold text-gray-600">
+                {row.cn_usage_status || 'ยังไม่มีข้อมูล'}
+              </span>
+            </span>
+
+            {isCancelled && row.cancelled_reason && (
+              <span className="truncate rounded-lg bg-red-50 px-2.5 py-1.5 text-[10px] text-red-400">
+                เหตุผล: {row.cancelled_reason}
+              </span>
+            )}
+
+          </div>
+
+        </div>
+
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-50 text-gray-300 transition-all group-hover:translate-x-1 group-hover:bg-white group-hover:text-gray-500">
+          <FaChevronRight size={12} />
+        </div>
+
+      </div>
+    </button>
   )
 }

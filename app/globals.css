@@ -24,3 +24,38 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+/* ============================================================
+   เพิ่มส่วนนี้ต่อท้าย app/globals.css ที่มีอยู่แล้ว (ไม่ต้องลบของเดิม)
+   ============================================================ */
+
+/* กัน iOS Safari auto-zoom เวลาแตะ input/select/textarea
+   สาเหตุ: iOS จะ zoom auto ถ้า font-size ของ field < 16px
+   บังคับ 16px ทุกจุดไม่ว่า Tailwind class ไหนจะตั้งไว้เท่าไหร่ */
+input,
+select,
+textarea {
+  font-size: 16px !important;
+}
+
+/* ตัด outline สีดำเริ่มต้นของเบราว์เซอร์ทิ้งทุก element ที่กดโฟกัสได้
+   ใช้ focus ring ของ Tailwind (focus:ring-2 focus:ring-{color}) แทน
+   ซึ่งสวยกว่าและคุมสีได้ตรงกับธีมของแต่ละหน้า */
+input,
+select,
+textarea,
+button,
+a {
+  outline: none;
+  -webkit-tap-highlight-color: transparent; /* ตัดกรอบฟ้าจางๆ ตอนแตะบนมือถือด้วย */
+}
+
+/* accessibility: ยังต้องมี focus indicator ให้คนใช้คีย์บอร์ด (Tab)
+   ใส่ ring กลับมาเฉพาะตอน focus-visible (ไม่โชว์ตอนคลิกเมาส์/แตะ) */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #3b9ee8;
+  outline-offset: 2px;
+}
