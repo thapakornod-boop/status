@@ -20,11 +20,41 @@ export default function CameraCapture({ onCapture, existingUrl }: Props) {
     }
   }, [])
 
+  // จุดสำคัญที่แก้: แนบ stream เข้า <video> ใน useEffect ที่ผูกกับ `active`
+  // แทนที่จะใช้ setTimeout(0) เพราะ useEffect การันตีว่า <video> mount เสร็จแล้วจริง
+  // (setTimeout(0) เคยทำให้จอดำ เพราะบางจังหวะ videoRef.current ยังเป็น null อยู่)
+  useEffect(() => {
+    if (!active || !videoRef.current || !streamRef.current) return
+
+    const video = videoRef.current
+    video.srcObject = streamRef.current
+    video.muted = true
+
+    const handleLoadedMetadata = () => {
+      video
+        .play()
+        .then(() => console.log('[CameraCapture] ✅ video.play() สำเร็จ'))
+        .catch((playErr) => {
+          console.error('[CameraCapture] video.play() error:', playErr)
+          setErr('เปิดวิดีโอไม่สำเร็จ ลองแตะปุ่มเปิดกล้องอีกครั้ง')
+        })
+    }
+    video.addEventListener('loadedmetadata', handleLoadedMetadata)
+
+    return () => video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+  }, [active])
+
   const startCamera = async () => {
     setErr('')
     console.log('[CameraCapture] เริ่มขอกล้อง...')
     console.log('[CameraCapture] secure context:', window.isSecureContext)
     console.log('[CameraCapture] protocol:', location.protocol, '| host:', location.host)
+
+    // เผื่อมี stream เก่าค้างอยู่ (เช่นจาก hot reload ตอน dev) ปล่อยก่อนขอใหม่
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+    }
 
     if (!navigator.mediaDevices?.getUserMedia) {
       console.error('[CameraCapture] navigator.mediaDevices.getUserMedia ไม่มีอยู่เลย')
@@ -41,37 +71,35 @@ export default function CameraCapture({ onCapture, existingUrl }: Props) {
         'ตัว:',
         cams.map((c) => c.label || '(ไม่มีชื่อ - ยังไม่ได้ allow)')
       )
-      if (cams.length === 0) {
-        console.warn('[CameraCapture] ไม่พบกล้องในเครื่องเลย')
-      }
     } catch (enumErr) {
       console.error('[CameraCapture] enumerateDevices error:', enumErr)
     }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' } },
-        audio: false,
-      })
-      console.log('[CameraCapture] ✅ getUserMedia สำเร็จ, tracks:', stream.getVideoTracks().map((t) => t.label))
-      streamRef.current = stream
-      setActive(true)
-      // wait a tick for the <video> to mount
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          videoRef.current
-            .play()
-            .then(() => console.log('[CameraCapture] ✅ video.play() สำเร็จ'))
-            .catch((playErr) => console.error('[CameraCapture] video.play() error:', playErr))
-        }
-      }, 0)
-    } catch (e: any) {
-      console.error('[CameraCapture] ❌ getUserMedia error name:', e?.name)
-      console.error('[CameraCapture] ❌ getUserMedia error message:', e?.message)
-      console.error('[CameraCapture] ❌ full error object:', e)
-      setErr(`เปิดกล้องไม่ได้ (${e?.name ?? 'unknown'}: ${e?.message ?? ''}) กรุณาอนุญาตการใช้กล้องในเบราว์เซอร์`)
+    // ลองแบบเจาะจงกล้องหลังก่อน ถ้าพังค่อย fallback เป็นขอกล้องแบบเรียบง่ายสุด
+    const attempts: MediaStreamConstraints[] = [
+      { video: { facingMode: { ideal: 'environment' } }, audio: false },
+      { video: true, audio: false },
+    ]
+
+    let lastError: any = null
+    for (const constraints of attempts) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints)
+        console.log(
+          '[CameraCapture] ✅ getUserMedia สำเร็จ, tracks:',
+          stream.getVideoTracks().map((t) => t.label)
+        )
+        streamRef.current = stream
+        setActive(true) // useEffect ด้านบนจะแนบ stream เข้า <video> ต่อเอง
+        return
+      } catch (e: any) {
+        lastError = e
+        console.error('[CameraCapture] ❌ attempt failed:', constraints, e?.name, e?.message)
+      }
     }
+
+    const name = lastError?.name
+    setErr(`เปิดกล้องไม่ได้ (${name ?? 'unknown'}: ${lastError?.message ?? ''}) ลองใช้ปุ่มสำรองด้านล่างแทนได้`)
   }
 
   const stopCamera = () => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 
 type Props = {
   onSign: (file: File) => void
@@ -9,77 +9,94 @@ type Props = {
 
 export default function SignaturePad({ onSign, existingUrl }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [isDrawing, setIsDrawing] = useState(false)
-  const [hasDrawn, setHasDrawn] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const drawing = useRef(false)
+  const hasDrawn = useRef(false)
+  const [signedPreview, setSignedPreview] = useState<string | null>(null)
+  const [resigning, setResigning] = useState(false)
 
-  const getPos = (e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = canvasRef.current!
+  // ตั้งขนาด canvas ให้ตรงกับพื้นที่จริงบนจอ (กัน blur / พิกัดเพี้ยนตอนวาด)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ratio = window.devicePixelRatio || 1
     const rect = canvas.getBoundingClientRect()
-    const point = 'touches' in e ? e.touches[0] : (e as React.MouseEvent)
-    return {
-      x: (point.clientX - rect.left) * (canvas.width / rect.width),
-      y: (point.clientY - rect.top) * (canvas.height / rect.height),
+    canvas.width = rect.width * ratio
+    canvas.height = rect.height * ratio
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      ctx.scale(ratio, ratio)
+      ctx.lineWidth = 2.5
+      ctx.lineCap = 'round'
+      ctx.strokeStyle = '#1f2937'
     }
+  }, [resigning])
+
+  const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const rect = canvasRef.current!.getBoundingClientRect()
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
   }
 
-  const start = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault()
-    setIsDrawing(true)
-    const ctx = canvasRef.current?.getContext('2d')
-    if (!ctx) return
+  const start = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    drawing.current = true
+    hasDrawn.current = true
+    const ctx = canvasRef.current!.getContext('2d')!
     const { x, y } = getPos(e)
     ctx.beginPath()
     ctx.moveTo(x, y)
+    ;(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId)
   }
 
-  const draw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing) return
-    e.preventDefault()
-    const ctx = canvasRef.current?.getContext('2d')
-    if (!ctx) return
+  const move = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current) return
+    const ctx = canvasRef.current!.getContext('2d')!
     const { x, y } = getPos(e)
     ctx.lineTo(x, y)
-    ctx.strokeStyle = '#1f2937'
-    ctx.lineWidth = 2.5
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
     ctx.stroke()
-    setHasDrawn(true)
   }
 
-  const end = () => setIsDrawing(false)
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current
-    const ctx = canvas?.getContext('2d')
-    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
-    setHasDrawn(false)
-    setSaved(false)
-    setPreviewUrl(null)
+  const end = () => {
+    drawing.current = false
   }
 
-  const confirmSign = () => {
+  const clear = () => {
     const canvas = canvasRef.current
     if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    ctx?.clearRect(0, 0, canvas.width, canvas.height)
+    hasDrawn.current = false
+  }
+
+  const confirmSignature = () => {
+    const canvas = canvasRef.current
+    if (!canvas || !hasDrawn.current) return
     canvas.toBlob((blob) => {
       if (!blob) return
       const file = new File([blob], `signature-${Date.now()}.png`, { type: 'image/png' })
-      setPreviewUrl(URL.createObjectURL(blob))
-      setSaved(true)
+      setSignedPreview(URL.createObjectURL(blob))
       onSign(file)
+      setResigning(false)
     }, 'image/png')
   }
 
-  if (saved && previewUrl) {
+  // มีลายเซ็นแล้ว (เคยเซ็นไว้ก่อนหน้า หรือเพิ่งเซ็นเสร็จ) และไม่ได้อยู่ในโหมดเซ็นใหม่
+  if ((existingUrl || signedPreview) && !resigning) {
     return (
-      <div>
-        <div className="border-2 border-gray-200 rounded-xl bg-gray-50 p-3 flex items-center justify-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={previewUrl} alt="ลายเซ็น" className="h-20" />
-        </div>
-        <button type="button" onClick={clearCanvas} className="text-sm text-gray-500 underline mt-1">
+      <div className="border-2 border-gray-200 rounded-xl p-3 bg-gray-50">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={signedPreview ?? existingUrl}
+          alt="ลายเซ็นยืนยันรับสินค้า"
+          className="h-20 mx-auto"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setSignedPreview(null)
+            setResigning(true)
+            setTimeout(clear, 0)
+          }}
+          className="w-full text-xs text-gray-400 underline mt-2"
+        >
           เซ็นใหม่
         </button>
       </div>
@@ -90,41 +107,27 @@ export default function SignaturePad({ onSign, existingUrl }: Props) {
     <div>
       <canvas
         ref={canvasRef}
-        width={500}
-        height={180}
-        className="w-full border-2 border-dashed border-gray-300 rounded-xl bg-white touch-none"
-        style={{ touchAction: 'none' }}
-        onMouseDown={start}
-        onMouseMove={draw}
-        onMouseUp={end}
-        onMouseLeave={end}
-        onTouchStart={start}
-        onTouchMove={draw}
-        onTouchEnd={end}
+        onPointerDown={start}
+        onPointerMove={move}
+        onPointerUp={end}
+        onPointerLeave={end}
+        className="w-full h-40 rounded-xl border-2 border-dashed border-gray-300 bg-white touch-none"
       />
-      <p className="text-xs text-gray-400 mt-1">ลากนิ้วหรือเมาส์ในกรอบเพื่อเซ็นชื่อยอมรับ</p>
-
-      <div className="flex gap-2 mt-2">
-        <button
-          type="button"
-          onClick={clearCanvas}
-          className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-500"
-        >
-          เคลียร์
-        </button>
-        <button
-          type="button"
-          onClick={confirmSign}
-          disabled={!hasDrawn}
-          className="flex-1 py-2 rounded-lg bg-gray-800 text-white text-sm font-medium disabled:opacity-40"
-        >
-          ยืนยันลายเซ็น
-        </button>
+      <div className="flex items-center justify-between mt-2">
+        <p className="text-xs text-gray-400">เซ็นด้วยนิ้วหรือลากเมาส์ในกรอบด้านบน</p>
+        <div className="flex gap-3">
+          <button type="button" onClick={clear} className="text-xs text-gray-400 underline">
+            ล้าง
+          </button>
+          <button
+            type="button"
+            onClick={confirmSignature}
+            className="text-xs font-semibold text-gray-800 underline"
+          >
+            ยืนยันลายเซ็น
+          </button>
+        </div>
       </div>
-
-      {existingUrl && !hasDrawn && (
-        <p className="text-xs text-gray-400 mt-1">มีลายเซ็นบันทึกไว้แล้ว (เซ็นใหม่เพื่อแทนที่)</p>
-      )}
     </div>
   )
 }

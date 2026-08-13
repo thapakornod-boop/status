@@ -4,7 +4,7 @@
 
 export type CaseType = 'sales' | 'transport'
 
-export type FieldType = 'text' | 'number' | 'photo' | 'checkbox' | 'select' | 'date' | 'items' | 'signature'
+export type FieldType = 'text' | 'number' | 'photo' | 'signature' | 'checkbox' | 'select' | 'date' | 'items'
 
 // role ของพนักงาน (ต้องตรงกับ constraint ในตาราง employees)
 export type EmployeeRole = 'sales' | 'wh' | 'admin' | 'head' | 'hr'
@@ -95,7 +95,12 @@ export const STEPS: Record<CaseType, StepDef[]> = {
         { key: 'srn_signed_photo_url', label: 'รูปร้านค้าเซ็นใน SRN (ตัวบรรจง)', type: 'photo', required: true, camera: true },
         { key: 'warehouse_in_photo_url', label: 'รูปนำสินค้าเข้าคลัง', type: 'photo', required: true, camera: true },
         { key: 'warehouse_supervisor_sign_photo_url', label: 'รูปหัวหน้าคลังเซ็นรับสินค้า', type: 'photo', required: true, camera: true },
-        { key: 'system_signature_url', label: 'เซ็นยอมรับว่าได้รับสินค้าครบถ้วน', type: 'signature', required: true },
+        {
+          key: 'system_signature_url',
+          label: 'ลายเซ็นยืนยันรับสินค้าในระบบ',
+          type: 'signature',
+          required: true,
+        },
         { key: 'item_mismatch', label: 'สินค้าไม่ตรงกับ SRN', type: 'checkbox' },
         {
           key: 'item_mismatch_note',

@@ -35,6 +35,7 @@ type CaseRow = {
   case_number: string | null
   current_step: number
   status: string
+  cancelled_reason: string | null
   cn_usage_status: string
   created_at: string
   stores: { store_code: string; store_name: string } | null
@@ -117,7 +118,7 @@ export default function CasePage() {
       .from(config.table)
       .select('id, case_number, current_step, stores(store_code, store_name)')
       .eq('created_by_employee_id', employee.id)
-      .neq('status', 'completed')
+      .eq('status', 'in_progress')
       .order('created_at', { ascending: false })
       .then(({ data }) => {
         setMyCases((data as unknown as MyCase[]) ?? [])
@@ -148,8 +149,8 @@ export default function CasePage() {
     if (!config || tab !== 'status') return
     setLoadingRows(true)
     const selectStr = config.hasTransport
-      ? 'id, case_number, current_step, status, cn_usage_status, created_at, stores(store_code, store_name), transport_companies(name)'
-      : 'id, case_number, current_step, status, cn_usage_status, created_at, stores(store_code, store_name)'
+      ? 'id, case_number, current_step, status, cancelled_reason, cn_usage_status, created_at, stores(store_code, store_name), transport_companies(name)'
+      : 'id, case_number, current_step, status, cancelled_reason, cn_usage_status, created_at, stores(store_code, store_name)'
 
     supabase
       .from(config.table)
@@ -171,7 +172,7 @@ export default function CasePage() {
       .from(config.table)
       .select('id, case_number, current_step')
       .eq('store_id', selectedStoreId)
-      .neq('status', 'completed')
+      .eq('status', 'in_progress')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -307,7 +308,22 @@ export default function CasePage() {
             )}
 
             {/* ค้นหาเคสเก่าด้วยเลขเคส */}
-      
+            <div className="flex gap-2 mb-6">
+              <input
+                type="text"
+                value={searchNumber}
+                onChange={(e) => setSearchNumber(e.target.value)}
+                placeholder="ค้นหาด้วยเลขเคส เช่น SL-202608-0001"
+                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-gray-300"
+              />
+              <button
+                onClick={handleSearchCaseNumber}
+                className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 font-medium"
+              >
+                ค้นหา
+              </button>
+            </div>
 
             <p className="text-xs text-gray-400 mb-1">ขั้นตอนที่ 1 / {config.totalSteps}</p>
             <h2 className="text-lg font-semibold text-gray-800 mb-6">เลือกร้านค้า</h2>
@@ -408,6 +424,7 @@ export default function CasePage() {
                     <th className="px-4 py-3 font-medium">ร้านค้า</th>
                     {config.hasTransport && <th className="px-4 py-3 font-medium">ขนส่ง</th>}
                     <th className="px-4 py-3 font-medium">ขั้นตอน</th>
+                    <th className="px-4 py-3 font-medium">สถานะ</th>
                     <th className="px-4 py-3 font-medium">สถานะ CN</th>
                   </tr>
                 </thead>
@@ -416,7 +433,9 @@ export default function CasePage() {
                     <tr
                       key={r.id}
                       onClick={() => router.push(`/case/${type}/${r.id}`)}
-                      className="border-b border-gray-50 last:border-0 hover:bg-gray-50 cursor-pointer"
+                      className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 cursor-pointer ${
+                        r.status === 'cancelled' ? 'opacity-50' : ''
+                      }`}
                     >
                       <td className="px-4 py-3 text-gray-700 font-mono text-xs">
                         {r.case_number ?? '-'}
@@ -430,6 +449,24 @@ export default function CasePage() {
                       )}
                       <td className="px-4 py-3 text-gray-700">
                         {r.current_step} / {config.totalSteps}
+                      </td>
+                      <td className="px-4 py-3">
+                        {r.status === 'cancelled' ? (
+                          <span
+                            className="text-xs px-2 py-1 rounded-full bg-red-50 text-red-500"
+                            title={r.cancelled_reason ?? ''}
+                          >
+                            ยกเลิก
+                          </span>
+                        ) : r.status === 'completed' ? (
+                          <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-600">
+                            เสร็จสิ้น
+                          </span>
+                        ) : (
+                          <span className="text-xs px-2 py-1 rounded-full bg-blue-50 text-blue-600">
+                            กำลังทำ
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <span

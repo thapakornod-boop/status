@@ -15,13 +15,18 @@ import {
   TYPE_LABEL,
   TOTAL_STEPS,
   FieldDef,
-  EmployeeRole,
-  ROLE_LABEL,
   canActOnStep,
+  EmployeeRole,
 } from '@/lib/caseSteps'
 
 type ItemRow = { item_code: string; amount: string }
-type Employee = { employee_id: string; name: string; role: EmployeeRole }
+
+type Employee = {
+  id: string
+  employee_id: string
+  name: string
+  role: EmployeeRole
+}
 
 export default function CaseStepPage() {
   const params = useParams<{ type: string; id: string }>()
@@ -35,7 +40,7 @@ export default function CaseStepPage() {
   const stepDefs = STEPS[type]
 
   const [employee, setEmployee] = useState<Employee | null>(null)
-  const [currentStep, setCurrentStep] = useState(2) // step 1 already done on /case/[type]
+  const [currentStep, setCurrentStep] = useState(2)
   const [row, setRow] = useState<Record<string, any> | null>(null)
   const [values, setValues] = useState<Record<string, any>>({})
   const [files, setFiles] = useState<Record<string, File | undefined>>({})
@@ -44,10 +49,18 @@ export default function CaseStepPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  const [showCancelForm, setShowCancelForm] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+
   useEffect(() => {
     const raw = localStorage.getItem('employee')
-    if (raw) setEmployee(JSON.parse(raw))
-  }, [])
+    if (!raw) {
+      router.push('/login')
+      return
+    }
+    setEmployee(JSON.parse(raw))
+  }, [router])
 
   useEffect(() => {
     if (!table) {
@@ -70,7 +83,6 @@ export default function CaseStepPage() {
         const step = data.current_step && data.current_step >= 2 ? data.current_step : 2
         setCurrentStep(step)
 
-        // preload existing items (for step 2, or when going back to review it)
         const { data: existingItems } = await supabase
           .from(itemsTable)
           .select('item_code, amount')
@@ -87,11 +99,59 @@ export default function CaseStepPage() {
   const step = stepDefs[stepIndex]
   const isLastStep = currentStep >= totalSteps
   const isDone = row?.status === 'completed'
+  const isCancelled = row?.status === 'cancelled'
 
-  // ---- role gating: ขั้นตอนนี้เป็นหน้าที่ของฉันไหม ----
-  const myRole = employee?.role
-  const canEditThisStep = !!myRole && !!step && canActOnStep(type, currentStep, myRole)
-  const isViewOnly = !isDone && (!myRole || !canEditThisStep)
+  // ใครยกเลิกเคสได้บ้าง: คนที่สร้างเคสเอง หรือ role admin/head (กันคนอื่นมายกเลิกมั่ว)
+  const canCancel =
+    !!employee &&
+    !isDone &&
+    !isCancelled &&
+    (row?.created_by_employee_id === employee.id ||
+      employee.role === 'admin' ||
+      employee.role === 'head')
+
+  const handleCancelCase = async () => {
+    if (!employee) return
+    if (!cancelReason.trim()) {
+      setError('กรุณาระบุเหตุผลที่ยกเลิกก่อนครับ')
+      return
+    }
+    setCancelling(true)
+    setError('')
+
+    const { error: cancelError } = await supabase
+      .from(table)
+      .update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+        cancelled_by_employee_id: employee.id,
+        cancelled_reason: cancelReason.trim(),
+      })
+      .eq('id', id)
+
+    setCancelling(false)
+
+    if (cancelError) {
+      setError('ยกเลิกไม่สำเร็จ: ' + cancelError.message)
+      return
+    }
+
+    setRow((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: 'cancelled',
+            cancelled_reason: cancelReason.trim(),
+          }
+        : prev
+    )
+    setShowCancelForm(false)
+  }
+
+  const canActThisStep = useMemo(() => {
+    if (!employee || !step) return false
+    return canActOnStep(type, currentStep, employee.role)
+  }, [employee, step, type, currentStep])
 
   const visibleFields = useMemo(
     () => (step ? step.fields.filter((f) => !f.showIf || f.showIf(values)) : []),
@@ -112,7 +172,6 @@ export default function CaseStepPage() {
   const updateItemRow = (idx: number, patch: Partial<ItemRow>) =>
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
 
-  // ---- validation: is every required field on this step filled? ----
   const isFieldFilled = (field: FieldDef) => {
     if (field.type === 'items') {
       const valid = items.filter((it) => it.item_code.trim() && parseFloat(it.amount) > 0)
@@ -128,15 +187,19 @@ export default function CaseStepPage() {
     return v !== undefined && v !== null && String(v).trim() !== ''
   }
 
-  const canSubmitStep =
-    canEditThisStep && visibleFields.every((f) => !f.required || isFieldFilled(f))
+  const canSubmitStep = visibleFields.every((f) => !f.required || isFieldFilled(f))
 
   const handleSubmitStep = async () => {
-    if (!step || !canEditThisStep) return
+    if (!step) return
     setError('')
 
+    if (!canActThisStep) {
+      setError('ขั้นตอนนี้ไม่ใช่หน้าที่ของคุณครับ')
+      return
+    }
+
     if (!canSubmitStep) {
-      setError('กรุณากรอก/ถ่ายรูปให้ครบตามที่บังคับก่อนไปขั้นตอนถัดไป')
+      setError('กรุณากรอก/ถ่ายรูป/เซ็นให้ครบตามที่บังคับก่อนไปขั้นตอนถัดไป')
       return
     }
 
@@ -145,7 +208,7 @@ export default function CaseStepPage() {
       const update: Record<string, any> = {}
 
       for (const field of visibleFields) {
-        if (field.type === 'items') continue // handled separately below
+        if (field.type === 'items') continue
         if (field.type === 'photo' || field.type === 'signature') {
           const file = files[field.key]
           if (file) {
@@ -159,7 +222,6 @@ export default function CaseStepPage() {
         }
       }
 
-      // save item list (step 2 only)
       const hasItemsField = step.fields.some((f) => f.type === 'items')
       if (hasItemsField) {
         const validItems = items.filter((it) => it.item_code.trim() && parseFloat(it.amount) > 0)
@@ -237,50 +299,103 @@ export default function CaseStepPage() {
         <div>
           <p className="text-xs text-gray-400">
             {row?.stores?.store_code ?? ''} {row?.stores?.store_name ?? ''}
+            {row?.case_number ? ` · ${row.case_number}` : ''}
           </p>
           <p className="font-semibold" style={{ color: accent }}>
             {TYPE_LABEL[type]}
           </p>
         </div>
-        {employee && (
-          <span className="ml-auto text-xs bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full">
-            {employee.name} · {ROLE_LABEL[employee.role]}
-          </span>
+        {canCancel && !showCancelForm && (
+          <button
+            onClick={() => setShowCancelForm(true)}
+            className="ml-auto text-xs text-red-400 hover:text-red-500 underline"
+          >
+            ยกเลิกเคสนี้
+          </button>
         )}
       </div>
 
       <div className="max-w-2xl mx-auto px-4 sm:px-0 py-8">
+        {showCancelForm && (
+          <div className="bg-white rounded-2xl shadow-sm border-2 border-red-200 p-6 sm:p-8 mb-4">
+            <p className="text-lg font-semibold text-red-600 mb-1">ยืนยันการยกเลิกเคสนี้</p>
+            <p className="text-sm text-gray-400 mb-4">
+              ข้อมูลจะไม่ถูกลบ แค่เปลี่ยนสถานะเป็น &ldquo;ยกเลิก&rdquo; เก็บไว้ตรวจสอบย้อนหลังได้
+            </p>
+            <label className="block text-sm font-medium text-gray-600 mb-1">
+              เหตุผลที่ยกเลิก <span className="text-red-400">*</span>
+            </label>
+            <textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="เช่น กรอกร้านค้าผิด, ลูกค้ายกเลิกคำขอ"
+              rows={3}
+              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 text-gray-800 mb-4"
+            />
+            {error && (
+              <p className="text-sm text-red-500 text-center bg-red-50 py-2 px-4 rounded-lg mb-4">
+                {error}
+              </p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowCancelForm(false)
+                  setCancelReason('')
+                  setError('')
+                }}
+                className="px-5 py-3 rounded-xl border border-gray-200 text-gray-500 font-medium"
+              >
+                ไม่ยกเลิก
+              </button>
+              <button
+                onClick={handleCancelCase}
+                disabled={cancelling}
+                className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-600 text-white font-semibold transition disabled:opacity-50"
+              >
+                {cancelling ? 'กำลังยกเลิก...' : 'ยืนยันยกเลิกเคส'}
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-8">
-          {isDone ? (
+          {isCancelled ? (
+            <div className="text-center py-10">
+              <p className="text-2xl mb-2">🚫</p>
+              <p className="text-lg font-semibold text-gray-800">เคสนี้ถูกยกเลิกแล้ว</p>
+              {row?.cancelled_reason && (
+                <p className="text-sm text-gray-400 mt-2">เหตุผล: {row.cancelled_reason}</p>
+              )}
+            </div>
+          ) : isDone ? (
             <div className="text-center py-10">
               <p className="text-2xl mb-2">✅</p>
               <p className="text-lg font-semibold text-gray-800">รายการนี้เสร็จสมบูรณ์แล้ว</p>
               <p className="text-sm text-gray-400 mt-1">CN: {row?.cn_usage_status}</p>
+            </div>
+          ) : !canActThisStep ? (
+            <div className="text-center py-10">
+              <p className="text-3xl mb-2">⏳</p>
+              <p className="text-lg font-semibold text-gray-800">ยังไม่ถึงคิวของคุณ</p>
+              <p className="text-sm text-gray-400 mt-1">
+                ขั้นตอนนี้เป็นหน้าที่ของ <span className="font-medium">{step?.role}</span>
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                (role ของคุณตอนนี้คือ &ldquo;{employee?.role}&rdquo;)
+              </p>
+              <p className="text-xs text-gray-400 mt-4">
+                ขั้นตอนที่ {currentStep} / {totalSteps} — {step?.title}
+              </p>
             </div>
           ) : (
             <>
               <p className="text-xs text-gray-400 mb-1">
                 ขั้นตอนที่ {currentStep} / {totalSteps} · รับผิดชอบโดย {step?.role}
               </p>
-              <h2 className="text-lg font-semibold text-gray-800 mb-4">{step?.title}</h2>
+              <h2 className="text-lg font-semibold text-gray-800 mb-6">{step?.title}</h2>
 
-              {isViewOnly && (
-                <div className="rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3 mb-5">
-                  <p className="text-sm font-medium text-amber-800">
-                    🔒 โหมดดูอย่างเดียว
-                  </p>
-                  <p className="text-xs text-amber-700 mt-0.5">
-                    ขั้นตอนนี้เป็นหน้าที่ของฝ่าย <strong>{step?.role}</strong>
-                    {employee ? (
-                      <> — คุณ ({ROLE_LABEL[employee.role]}) ดูข้อมูลได้ แต่แก้ไข/บันทึกไม่ได้</>
-                    ) : (
-                      <> — กรุณาเข้าสู่ระบบก่อน</>
-                    )}
-                  </p>
-                </div>
-              )}
-
-              <div className={`space-y-5 ${isViewOnly ? 'opacity-70 pointer-events-none' : ''}`}>
+              <div className="space-y-5">
                 {visibleFields.map((field) => (
                   <div key={field.key}>
                     {field.type !== 'items' && (
@@ -294,7 +409,6 @@ export default function CaseStepPage() {
                         type="text"
                         value={values[field.key] ?? ''}
                         onChange={(e) => setValue(field.key, e.target.value)}
-                        disabled={isViewOnly}
                         className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 text-gray-800"
                       />
                     )}
@@ -304,7 +418,6 @@ export default function CaseStepPage() {
                         type="number"
                         value={values[field.key] ?? ''}
                         onChange={(e) => setValue(field.key, e.target.value)}
-                        disabled={isViewOnly}
                         className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 text-gray-800"
                       />
                     )}
@@ -314,7 +427,6 @@ export default function CaseStepPage() {
                         type="date"
                         value={values[field.key] ?? ''}
                         onChange={(e) => setValue(field.key, e.target.value)}
-                        disabled={isViewOnly}
                         className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 text-gray-800"
                       />
                     )}
@@ -325,7 +437,6 @@ export default function CaseStepPage() {
                           type="checkbox"
                           checked={!!values[field.key]}
                           onChange={(e) => setValue(field.key, e.target.checked)}
-                          disabled={isViewOnly}
                           className="w-4 h-4"
                         />
                         ยืนยัน
@@ -336,7 +447,6 @@ export default function CaseStepPage() {
                       <select
                         value={values[field.key] ?? ''}
                         onChange={(e) => setValue(field.key, e.target.value)}
-                        disabled={isViewOnly}
                         className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 text-gray-800"
                       >
                         <option value="">-- เลือก --</option>
@@ -349,7 +459,6 @@ export default function CaseStepPage() {
                     )}
 
                     {field.type === 'photo' && field.camera !== false && (
-                      // บังคับถ่ายรูปด้วยกล้องจริง ๆ ไม่มีทางเลือกไฟล์จากคลังภาพ
                       <CameraCapture
                         existingUrl={values[field.key]}
                         onCapture={(file) =>
@@ -359,12 +468,10 @@ export default function CaseStepPage() {
                     )}
 
                     {field.type === 'photo' && field.camera === false && (
-                      // อนุญาตเลือกจากคลังภาพได้ (เช่น รูปแคปหน้าจออีเมล)
                       <div>
                         <input
                           type="file"
                           accept="image/*"
-                          disabled={isViewOnly}
                           onChange={(e) =>
                             setFiles((prev) => ({ ...prev, [field.key]: e.target.files?.[0] }))
                           }
@@ -397,7 +504,6 @@ export default function CaseStepPage() {
                                 type="text"
                                 placeholder="รหัสสินค้า"
                                 value={it.item_code}
-                                disabled={isViewOnly}
                                 onChange={(e) => updateItemRow(idx, { item_code: e.target.value })}
                                 className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm"
                               />
@@ -405,7 +511,6 @@ export default function CaseStepPage() {
                                 type="number"
                                 placeholder="ยอดเงิน"
                                 value={it.amount}
-                                disabled={isViewOnly}
                                 onChange={(e) => updateItemRow(idx, { amount: e.target.value })}
                                 className="w-32 px-3 py-2 rounded-lg border border-gray-200 text-sm"
                               />
@@ -443,26 +548,24 @@ export default function CaseStepPage() {
                 </p>
               )}
 
-              {!isViewOnly && (
-                <div className="flex gap-3 mt-6">
-                  {currentStep > 2 && (
-                    <button
-                      onClick={goBackStep}
-                      className="px-5 py-3 rounded-xl border border-gray-200 text-gray-500 font-medium"
-                    >
-                      ย้อนกลับ
-                    </button>
-                  )}
+              <div className="flex gap-3 mt-6">
+                {currentStep > 2 && (
                   <button
-                    onClick={handleSubmitStep}
-                    disabled={saving || !canSubmitStep}
-                    className="flex-1 py-3 rounded-xl text-white font-semibold transition disabled:opacity-40"
-                    style={{ backgroundColor: accent }}
+                    onClick={goBackStep}
+                    className="px-5 py-3 rounded-xl border border-gray-200 text-gray-500 font-medium"
                   >
-                    {saving ? 'กำลังบันทึก...' : isLastStep ? 'บันทึกและจบงาน' : 'บันทึกและไปต่อ'}
+                    ย้อนกลับ
                   </button>
-                </div>
-              )}
+                )}
+                <button
+                  onClick={handleSubmitStep}
+                  disabled={saving || !canSubmitStep}
+                  className="flex-1 py-3 rounded-xl text-white font-semibold transition disabled:opacity-40"
+                  style={{ backgroundColor: accent }}
+                >
+                  {saving ? 'กำลังบันทึก...' : isLastStep ? 'บันทึกและจบงาน' : 'บันทึกและไปต่อ'}
+                </button>
+              </div>
             </>
           )}
         </div>
