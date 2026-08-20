@@ -38,16 +38,42 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  // อนุญาตแค่ A-Z + 0-9, auto-uppercase, ตัดไม่ให้เกิน 7 ตัว (3 ตัวอักษร + 4 ตัวเลข)
+  const handleEmployeeIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 7)
+    setEmployeeId(value)
+  }
+
+  // อนุญาตแค่ตัวเลข, ตัดไม่ให้เกิน 13 หลัก
+  const handleIdCardChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/[^0-9]/g, '').slice(0, 13)
+    setIdCard(value)
+  }
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+
+    const empId = employeeId.trim()
+    const employeeIdPattern = /^[A-Z]{3}[0-9]{4}$/
+
+    if (!employeeIdPattern.test(empId)) {
+      setError('รหัสพนักงานไม่ถูกต้อง กรุณากรอกในรูปแบบ SDO1234')
+      return
+    }
+
+    if (idCard.trim().length !== 13) {
+      setError('กรุณากรอกเลขบัตรประชาชนให้ครบ 13 หลัก')
+      return
+    }
+
     setLoading(true)
 
     try {
       const { data, error: dbError } = await supabase
         .from('employees')
         .select('id, employee_id, name, role')
-        .eq('employee_id', employeeId.trim())
+        .eq('employee_id', empId)
         .eq('id_card', idCard.trim())
         .single()
 
@@ -61,11 +87,11 @@ export default function LoginPage() {
 
       const role = data.role?.toLowerCase()
       if (role === 'admin') {
-        router.push('/admin')
+        router.push('/case/lg')
       } else if (role === 'hr') {
         router.push('/hr')
       } else if (role === 'head') {
-        router.push('/overview')
+        router.push('/dashboard')
       } else {
         router.push('/select')
       }
@@ -170,9 +196,11 @@ export default function LoginPage() {
                 <input
                   type="text"
                   value={employeeId}
-                  onChange={(e) => setEmployeeId(e.target.value)}
-                  placeholder="เช่น SDO0586"
+                  onChange={handleEmployeeIdChange}
+                  placeholder="เช่น SDO1234"
                   required
+                  maxLength={7}
+                  autoCapitalize="characters"
                   className="w-full px-4 py-3 rounded-xl border border-gray-200
                              focus:ring-2 focus:ring-[#3B9EE8] focus:border-transparent
                              text-gray-800 placeholder-gray-300 transition"
@@ -186,9 +214,10 @@ export default function LoginPage() {
                 <input
                   type="password"
                   value={idCard}
-                  onChange={(e) => setIdCard(e.target.value)}
+                  onChange={handleIdCardChange}
                   placeholder="กรอกเลข 13 หลัก"
                   required
+                  inputMode="numeric"
                   maxLength={13}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200
                              focus:ring-2 focus:ring-[#3B9EE8] focus:border-transparent

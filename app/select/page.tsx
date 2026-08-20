@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import type { ComponentType } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   FaRegUserCircle,
@@ -8,18 +9,121 @@ import {
   FaArrowRight,
   FaBoxOpen,
   FaChevronRight,
+  FaWarehouse,
+  FaFileInvoice,
 } from 'react-icons/fa'
+import { EmployeeRole } from '@/lib/caseSteps'
 
 type Employee = {
   employee_id: string
   name: string
-  role: string
+  role: EmployeeRole
+}
+
+type IconType = ComponentType<{ size?: number; className?: string }>
+
+type SelectCard = {
+  key: string
+  title: string
+  description: string
+  icon: IconType
+  badgeIcon: IconType
+  accent: string
+  accentTo: string
+  href: string
+}
+
+const BLUE = { from: '#3B9EE8', to: '#237FC9' }
+const ORANGE = { from: '#F2994A', to: '#E77D25' }
+
+// เพิ่ม/แก้เมนูของแต่ละ role ได้ที่นี่ที่เดียว
+function getCardsForRole(role: EmployeeRole | undefined): SelectCard[] {
+  switch (role) {
+    case 'sales':
+      return [
+        {
+          key: 'sales',
+          title: 'เซลล์',
+          description: 'ไปรับของหมดอายุ\nจากร้านค้าด้วยตัวเอง',
+          icon: FaRegUserCircle,
+          badgeIcon: FaBoxOpen,
+          accent: BLUE.from,
+          accentTo: BLUE.to,
+          href: '/case/sales',
+        },
+      ]
+
+    case 'transport':
+      return [
+        {
+          key: 'transport',
+          title: 'ขนส่ง',
+          description: 'ให้บริษัทขนส่ง\nไปรับของแทน',
+          icon: FaTruck,
+          badgeIcon: FaChevronRight,
+          accent: ORANGE.from,
+          accentTo: ORANGE.to,
+          href: '/case/transport',
+        },
+      ]
+
+    case 'wh':
+      return [
+        {
+          key: 'sales-wh',
+          title: 'คิวคลัง (เซลล์)',
+          description: 'นับสินค้ากระทบ SRN\nจากสายเซลล์',
+          icon: FaWarehouse,
+          badgeIcon: FaBoxOpen,
+          accent: BLUE.from,
+          accentTo: BLUE.to,
+          href: '/case/sales/wh',
+        },
+        {
+          key: 'transport-wh',
+          title: 'คิวคลัง (ขนส่ง)',
+          description: 'นับสินค้ากระทบ SRN\nจากสายขนส่ง',
+          icon: FaWarehouse,
+          badgeIcon: FaChevronRight,
+          accent: ORANGE.from,
+          accentTo: ORANGE.to,
+          href: '/case/transport/wh',
+        },
+      ]
+
+    case 'admin':
+      return [
+        {
+          key: 'sales-admin',
+          title: 'คิวออก CN (เซลล์)',
+          description: 'ออกเอกสาร CN\nให้สายเซลล์',
+          icon: FaFileInvoice,
+          badgeIcon: FaBoxOpen,
+          accent: BLUE.from,
+          accentTo: BLUE.to,
+          href: '/case/sales/lg',
+        },
+        {
+          key: 'transport-admin',
+          title: 'คิวออก CN (ขนส่ง)',
+          description: 'ออกเอกสาร CN\nให้สายขนส่ง',
+          icon: FaFileInvoice,
+          badgeIcon: FaChevronRight,
+          accent: ORANGE.from,
+          accentTo: ORANGE.to,
+          href: '/case/transport/lg',
+        },
+      ]
+
+    default:
+      return []
+  }
 }
 
 export default function SelectSidePage() {
   const router = useRouter()
   const [employee, setEmployee] = useState<Employee | null>(null)
-  const [hovered, setHovered] = useState<'sales' | 'transport' | null>(null)
+  const [hovered, setHovered] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -39,9 +143,7 @@ export default function SelectSidePage() {
     }
   }, [router])
 
-  const goTo = (type: 'sales' | 'transport') => {
-    router.push(`/case/${type}`)
-  }
+  const cards = getCardsForRole(employee?.role)
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#f5f8fc] flex flex-col items-center justify-center px-4 py-10">
@@ -49,36 +151,10 @@ export default function SelectSidePage() {
       {/* ================= BACKGROUND DECORATION ================= */}
 
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-
-        {/* Blue glow */}
-        <div
-          className="
-            absolute -top-32 -left-32
-            w-[420px] h-[420px]
-            rounded-full
-            bg-[#3B9EE8]/10
-            blur-3xl
-            animate-pulse
-          "
-        />
-
-        {/* Orange glow */}
-        <div
-          className="
-            absolute -bottom-40 -right-32
-            w-[450px] h-[450px]
-            rounded-full
-            bg-[#F2994A]/10
-            blur-3xl
-            animate-pulse
-          "
-        />
-
-        {/* Small floating circles */}
+        <div className="absolute -top-32 -left-32 w-[420px] h-[420px] rounded-full bg-[#3B9EE8]/10 blur-3xl animate-pulse" />
+        <div className="absolute -bottom-40 -right-32 w-[450px] h-[450px] rounded-full bg-[#F2994A]/10 blur-3xl animate-pulse" />
         <div className="absolute top-[18%] right-[12%] w-3 h-3 rounded-full bg-[#3B9EE8]/20 animate-bounce" />
         <div className="absolute bottom-[20%] left-[10%] w-4 h-4 rounded-full bg-[#F2994A]/20 animate-bounce [animation-delay:500ms]" />
-
-        {/* Grid */}
         <div
           className="
             absolute inset-0
@@ -95,10 +171,7 @@ export default function SelectSidePage() {
         className={`
           relative z-10 w-full max-w-4xl
           transition-all duration-700
-          ${mounted
-            ? 'opacity-100 translate-y-0'
-            : 'opacity-0 translate-y-6'
-          }
+          ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}
         `}
       >
 
@@ -106,7 +179,6 @@ export default function SelectSidePage() {
 
         <div className="text-center mb-8 md:mb-10">
 
-          {/* Small badge */}
           <div
             className="
               inline-flex items-center gap-2
@@ -128,21 +200,18 @@ export default function SelectSidePage() {
             </span>
           </div>
 
-          {/* Greeting */}
-          <p className="text-sm text-gray-400 mb-1">
-            สวัสดีครับ
-          </p>
+          <p className="text-sm text-gray-400 mb-1">สวัสดีครับ</p>
 
           <h1 className="text-2xl md:text-4xl font-bold tracking-tight text-gray-800">
             {employee?.name || 'กำลังโหลด...'}
           </h1>
 
-          {/* Subtitle */}
           <p className="text-sm md:text-base text-gray-400 mt-3">
-            เลือกช่องทางสำหรับการรับของเสีย
+            {cards.length > 0
+              ? 'เลือกช่องทางสำหรับการรับของเสีย'
+              : 'ยังไม่มีเมนูสำหรับบทบาทนี้'}
           </p>
 
-          {/* Employee ID */}
           {employee && (
             <div className="mt-3 inline-flex items-center gap-2 text-xs text-gray-400">
               <span className="px-2.5 py-1 rounded-md bg-gray-100">
@@ -158,386 +227,62 @@ export default function SelectSidePage() {
 
         {/* ================= SELECT CARDS ================= */}
 
-        <div className="relative grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-0">
+        {cards.length === 0 ? (
 
-          {/* ================= SALES ================= */}
-
-          <button
-            onClick={() => goTo('sales')}
-            onMouseEnter={() => setHovered('sales')}
-            onMouseLeave={() => setHovered(null)}
-            className={`
-              group relative overflow-hidden
-              min-h-[300px]
-              md:min-h-[360px]
-              p-8 md:p-10
-              flex flex-col items-center justify-center
-              text-center
-              rounded-3xl md:rounded-r-none
-              border
-              transition-all duration-500
-              outline-none
-              ${
-                hovered === 'sales'
-                  ? `
-                    bg-gradient-to-br from-[#3B9EE8] to-[#237FC9]
-                    border-[#3B9EE8]
-                    shadow-[0_25px_70px_-20px_rgba(59,158,232,0.65)]
-                    md:scale-[1.035]
-                    z-20
-                  `
-                  : `
-                    bg-white/85
-                    border-gray-200/80
-                    shadow-[0_15px_40px_-25px_rgba(0,0,0,0.25)]
-                    hover:border-[#3B9EE8]/40
-                  `
-              }
-            `}
-          >
-
-            {/* Decorative circle */}
-            <div
-              className={`
-                absolute -top-20 -right-20
-                w-48 h-48 rounded-full
-                border-[30px]
-                transition-all duration-700
-                ${
-                  hovered === 'sales'
-                    ? 'border-white/10 scale-110'
-                    : 'border-[#3B9EE8]/5'
-                }
-              `}
-            />
-
-            {/* Bottom glow */}
-            <div
-              className={`
-                absolute -bottom-24 -left-16
-                w-48 h-48
-                rounded-full
-                blur-3xl
-                transition-opacity duration-500
-                ${
-                  hovered === 'sales'
-                    ? 'bg-white/10 opacity-100'
-                    : 'opacity-0'
-                }
-              `}
-            />
-
-            {/* Icon */}
-            <div
-              className={`
-                relative z-10
-                w-24 h-24
-                rounded-[28px]
-                flex items-center justify-center
-                transition-all duration-500
-                ${
-                  hovered === 'sales'
-                    ? `
-                      bg-white/20
-                      text-white
-                      rotate-3
-                      scale-110
-                      shadow-lg
-                    `
-                    : `
-                      bg-[#3B9EE8]/10
-                      text-[#3B9EE8]
-                    `
-                }
-              `}
-            >
-              <FaRegUserCircle
-                size={48}
-                className={`
-                  transition-transform duration-500
-                  ${hovered === 'sales' ? 'scale-110' : ''}
-                `}
-              />
-
-              {/* Tiny box icon */}
-              <div
-                className={`
-                  absolute -right-2 -bottom-2
-                  w-8 h-8 rounded-xl
-                  flex items-center justify-center
-                  shadow-md
-                  transition-all duration-500
-                  ${
-                    hovered === 'sales'
-                      ? 'bg-white text-[#3B9EE8]'
-                      : 'bg-[#3B9EE8] text-white'
-                  }
-                `}
-              >
-                <FaBoxOpen size={14} />
-              </div>
-            </div>
-
-            {/* Text */}
-            <div className="relative z-10 mt-6">
-
-              <p
-                className={`
-                  text-2xl font-bold
-                  transition-colors duration-300
-                  ${
-                    hovered === 'sales'
-                      ? 'text-white'
-                      : 'text-gray-800'
-                  }
-                `}
-              >
-                เซลล์
-              </p>
-
-              <p
-                className={`
-                  text-sm mt-2 max-w-[250px]
-                  leading-relaxed
-                  transition-colors duration-300
-                  ${
-                    hovered === 'sales'
-                      ? 'text-white/80'
-                      : 'text-gray-400'
-                  }
-                `}
-              >
-                ไปรับของหมดอายุ
-                <br />
-                จากร้านค้าด้วยตัวเอง
-              </p>
-
-            </div>
-
-            {/* Bottom action */}
-            <div
-              className={`
-                relative z-10
-                mt-7
-                inline-flex items-center gap-2
-                text-xs font-semibold
-                transition-all duration-300
-                ${
-                  hovered === 'sales'
-                    ? 'text-white translate-x-1'
-                    : 'text-[#3B9EE8]'
-                }
-              `}
-            >
-              เลือกฝั่งนี้
-              <FaArrowRight
-                className="transition-transform duration-300 group-hover:translate-x-1"
-              />
-            </div>
-
-          </button>
-
-          {/* ================= CENTER OR ================= */}
-
-          <div
-            className="
-              hidden md:flex
-              absolute
-              left-1/2 top-1/2
-              -translate-x-1/2 -translate-y-1/2
-              z-30
-              w-14 h-14
-              rounded-full
-              bg-white
-              border-[6px]
-              border-[#f5f8fc]
-              shadow-lg
-              items-center justify-center
-            "
-          >
-            <span className="text-[10px] font-bold text-gray-400">
-              OR
-            </span>
+          <div className="rounded-3xl border border-gray-200 bg-white/85 p-10 text-center text-sm text-gray-400 shadow-sm">
+            บทบาทของคุณยังไม่ได้ตั้งค่าเมนูในหน้านี้ กรุณาติดต่อผู้ดูแลระบบ
           </div>
 
-          {/* ================= TRANSPORT ================= */}
+        ) : cards.length === 1 ? (
 
-          <button
-            onClick={() => goTo('transport')}
-            onMouseEnter={() => setHovered('transport')}
-            onMouseLeave={() => setHovered(null)}
-            className={`
-              group relative overflow-hidden
-              min-h-[300px]
-              md:min-h-[360px]
-              p-8 md:p-10
-              flex flex-col items-center justify-center
-              text-center
-              rounded-3xl md:rounded-l-none
-              border
-              transition-all duration-500
-              outline-none
-              ${
-                hovered === 'transport'
-                  ? `
-                    bg-gradient-to-br from-[#F2994A] to-[#E77D25]
-                    border-[#F2994A]
-                    shadow-[0_25px_70px_-20px_rgba(242,153,74,0.65)]
-                    md:scale-[1.035]
-                    z-20
-                  `
-                  : `
-                    bg-white/85
-                    border-gray-200/80
-                    shadow-[0_15px_40px_-25px_rgba(0,0,0,0.25)]
-                    hover:border-[#F2994A]/40
-                  `
-              }
-            `}
-          >
-
-            {/* Decorative circle */}
-            <div
-              className={`
-                absolute -bottom-24 -right-20
-                w-52 h-52 rounded-full
-                border-[30px]
-                transition-all duration-700
-                ${
-                  hovered === 'transport'
-                    ? 'border-white/10 scale-110'
-                    : 'border-[#F2994A]/5'
-                }
-              `}
+          <div className="flex justify-center">
+            <SelectCardButton
+              card={cards[0]}
+              hovered={hovered === cards[0].key}
+              onEnter={() => setHovered(cards[0].key)}
+              onLeave={() => setHovered(null)}
+              onClick={() => router.push(cards[0].href)}
+              wide
             />
+          </div>
 
-            {/* Top glow */}
+        ) : (
+
+          <div className="relative grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-0">
+
+            {cards.map((card, i) => (
+              <SelectCardButton
+                key={card.key}
+                card={card}
+                hovered={hovered === card.key}
+                onEnter={() => setHovered(card.key)}
+                onLeave={() => setHovered(null)}
+                onClick={() => router.push(card.href)}
+                roundedSide={i === 0 ? 'left' : 'right'}
+              />
+            ))}
+
             <div
-              className={`
-                absolute -top-24 -left-16
-                w-48 h-48
+              className="
+                hidden md:flex
+                absolute left-1/2 top-1/2
+                -translate-x-1/2 -translate-y-1/2
+                z-30
+                w-14 h-14
                 rounded-full
-                blur-3xl
-                transition-opacity duration-500
-                ${
-                  hovered === 'transport'
-                    ? 'bg-white/10 opacity-100'
-                    : 'opacity-0'
-                }
-              `}
-            />
-
-            {/* Icon */}
-            <div
-              className={`
-                relative z-10
-                w-24 h-24
-                rounded-[28px]
-                flex items-center justify-center
-                transition-all duration-500
-                ${
-                  hovered === 'transport'
-                    ? `
-                      bg-white/20
-                      text-white
-                      -rotate-3
-                      scale-110
-                      shadow-lg
-                    `
-                    : `
-                      bg-[#F2994A]/10
-                      text-[#F2994A]
-                    `
-                }
-              `}
+                bg-white
+                border-[6px]
+                border-[#f5f8fc]
+                shadow-lg
+                items-center justify-center
+              "
             >
-              <FaTruck
-                size={46}
-                className={`
-                  transition-transform duration-500
-                  ${hovered === 'transport' ? 'scale-110' : ''}
-                `}
-              />
-
-              {/* Status dot */}
-              <div
-                className={`
-                  absolute -right-2 -bottom-2
-                  w-8 h-8 rounded-xl
-                  flex items-center justify-center
-                  shadow-md
-                  transition-all duration-500
-                  ${
-                    hovered === 'transport'
-                      ? 'bg-white text-[#F2994A]'
-                      : 'bg-[#F2994A] text-white'
-                  }
-                `}
-              >
-                <FaChevronRight size={12} />
-              </div>
+              <span className="text-[10px] font-bold text-gray-400">OR</span>
             </div>
 
-            {/* Text */}
-            <div className="relative z-10 mt-6">
+          </div>
 
-              <p
-                className={`
-                  text-2xl font-bold
-                  transition-colors duration-300
-                  ${
-                    hovered === 'transport'
-                      ? 'text-white'
-                      : 'text-gray-800'
-                  }
-                `}
-              >
-                ขนส่ง
-              </p>
-
-              <p
-                className={`
-                  text-sm mt-2 max-w-[250px]
-                  leading-relaxed
-                  transition-colors duration-300
-                  ${
-                    hovered === 'transport'
-                      ? 'text-white/80'
-                      : 'text-gray-400'
-                  }
-                `}
-              >
-                ให้บริษัทขนส่ง
-                <br />
-                ไปรับของแทน
-              </p>
-
-            </div>
-
-            {/* Bottom action */}
-            <div
-              className={`
-                relative z-10
-                mt-7
-                inline-flex items-center gap-2
-                text-xs font-semibold
-                transition-all duration-300
-                ${
-                  hovered === 'transport'
-                    ? 'text-white translate-x-1'
-                    : 'text-[#F2994A]'
-                }
-              `}
-            >
-              เลือกฝั่งนี้
-              <FaArrowRight
-                className="transition-transform duration-300 group-hover:translate-x-1"
-              />
-            </div>
-
-          </button>
-
-        </div>
+        )}
 
         {/* ================= FOOTER ================= */}
 
@@ -549,14 +294,166 @@ export default function SelectSidePage() {
             <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
           </div>
 
-          <p className="text-[10px] text-gray-300">
-            Waste Collection System
-          </p>
+          <p className="text-[10px] text-gray-300">Waste Collection System</p>
 
         </div>
 
       </div>
 
     </main>
+  )
+}
+
+/* =========================================================
+   SELECT CARD BUTTON (ใช้ร่วมกันทุก role)
+========================================================= */
+
+function SelectCardButton({
+  card,
+  hovered,
+  onEnter,
+  onLeave,
+  onClick,
+  roundedSide,
+  wide,
+}: {
+  card: SelectCard
+  hovered: boolean
+  onEnter: () => void
+  onLeave: () => void
+  onClick: () => void
+  roundedSide?: 'left' | 'right'
+  wide?: boolean
+}) {
+  const Icon = card.icon
+  const Badge = card.badgeIcon
+
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      className={`
+        group relative overflow-hidden
+        min-h-[300px] md:min-h-[360px]
+        p-8 md:p-10
+        flex flex-col items-center justify-center text-center
+        rounded-3xl
+        ${roundedSide === 'left' ? 'md:rounded-r-none' : ''}
+        ${roundedSide === 'right' ? 'md:rounded-l-none' : ''}
+        ${wide ? 'w-full max-w-md' : ''}
+        border transition-all duration-500 outline-none
+        ${
+          hovered
+            ? 'border-transparent md:scale-[1.035] z-20'
+            : 'bg-white/85 border-gray-200/80 shadow-[0_15px_40px_-25px_rgba(0,0,0,0.25)]'
+        }
+      `}
+      style={
+        hovered
+          ? {
+              background: `linear-gradient(135deg, ${card.accent}, ${card.accentTo})`,
+              boxShadow: `0 25px 70px -20px ${card.accent}aa`,
+            }
+          : undefined
+      }
+    >
+
+      {/* Decorative circle */}
+      <div
+        className={`
+          absolute -top-20 -right-20
+          w-48 h-48 rounded-full
+          border-[30px]
+          transition-all duration-700
+          ${hovered ? 'border-white/10 scale-110' : ''}
+        `}
+        style={!hovered ? { borderColor: `${card.accent}0d` } : undefined}
+      />
+
+      {/* Bottom glow */}
+      <div
+        className={`
+          absolute -bottom-24 -left-16
+          w-48 h-48 rounded-full blur-3xl
+          transition-opacity duration-500
+          ${hovered ? 'bg-white/10 opacity-100' : 'opacity-0'}
+        `}
+      />
+
+      {/* Icon */}
+      <div
+        className={`
+          relative z-10
+          w-24 h-24
+          rounded-[28px]
+          flex items-center justify-center
+          transition-all duration-500
+          ${hovered ? 'bg-white/20 text-white rotate-3 scale-110 shadow-lg' : ''}
+        `}
+        style={
+          !hovered
+            ? { backgroundColor: `${card.accent}1a`, color: card.accent }
+            : undefined
+        }
+      >
+        <Icon size={44} className={hovered ? 'scale-110' : ''} />
+
+        <div
+          className="
+            absolute -right-2 -bottom-2
+            w-8 h-8 rounded-xl
+            flex items-center justify-center
+            shadow-md
+            transition-all duration-500
+          "
+          style={{
+            backgroundColor: hovered ? 'white' : card.accent,
+            color: hovered ? card.accent : 'white',
+          }}
+        >
+          <Badge size={14} />
+        </div>
+      </div>
+
+      {/* Text */}
+      <div className="relative z-10 mt-6">
+        <p
+          className={`
+            text-2xl font-bold transition-colors duration-300
+            ${hovered ? 'text-white' : 'text-gray-800'}
+          `}
+        >
+          {card.title}
+        </p>
+
+        <p
+          className={`
+            text-sm mt-2 max-w-[250px]
+            leading-relaxed whitespace-pre-line
+            transition-colors duration-300
+            ${hovered ? 'text-white/80' : 'text-gray-400'}
+          `}
+        >
+          {card.description}
+        </p>
+      </div>
+
+      {/* Bottom action */}
+      <div
+        className={`
+          relative z-10 mt-7
+          inline-flex items-center gap-2
+          text-xs font-semibold
+          transition-all duration-300
+          ${hovered ? 'text-white translate-x-1' : ''}
+        `}
+        style={!hovered ? { color: card.accent } : undefined}
+      >
+        เลือกเมนูนี้
+        <FaArrowRight className="transition-transform duration-300 group-hover:translate-x-1" />
+      </div>
+
+    </button>
   )
 }

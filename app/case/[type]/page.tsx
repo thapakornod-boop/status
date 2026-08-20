@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { TOTAL_STEPS } from '@/lib/caseSteps'
@@ -54,6 +54,7 @@ type CaseRow = {
   cancelled_reason: string | null
   cn_usage_status: string
   created_at: string
+  created_by_employee_id?: string | null
   stores: { store_code: string; store_name: string } | null
   transport_companies?: { name: string } | null
 }
@@ -100,6 +101,8 @@ export default function CasePage() {
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [myCases, setMyCases] = useState<MyCase[]>([])
   const [loadingMyCases, setLoadingMyCases] = useState(true)
+  const [showMyCasesDropdown, setShowMyCasesDropdown] = useState(false)
+  const myCasesRef = useRef<HTMLDivElement>(null)
 
   const [stores, setStores] = useState<Store[]>([])
   const [transports, setTransports] = useState<TransportCompany[]>([])
@@ -171,23 +174,25 @@ export default function CasePage() {
   }, [config])
 
   useEffect(() => {
-    if (!config || tab !== 'status') return
+    if (!config || tab !== 'status' || !employee?.id) return
 
     setLoadingRows(true)
 
     const selectStr = config.hasTransport
-      ? 'id, case_number, current_step, status, cancelled_reason, cn_usage_status, created_at, stores(store_code, store_name), transport_companies(name)'
-      : 'id, case_number, current_step, status, cancelled_reason, cn_usage_status, created_at, stores(store_code, store_name)'
+      ? 'id, case_number, current_step, status, cancelled_reason, cn_usage_status, created_at, created_by_employee_id, stores(store_code, store_name), transport_companies(name)'
+      : 'id, case_number, current_step, status, cancelled_reason, cn_usage_status, created_at, created_by_employee_id, stores(store_code, store_name)'
 
     supabase
       .from(config.table)
       .select(selectStr)
+      // แสดงเฉพาะเคสที่พนักงานคนนี้เป็นคนสร้างเท่านั้น
+      .eq('created_by_employee_id', employee.id)
       .order('created_at', { ascending: false })
       .then(({ data }) => {
         setRows((data as unknown as CaseRow[]) ?? [])
         setLoadingRows(false)
       })
-  }, [tab, config])
+  }, [tab, config, employee])
 
   useEffect(() => {
     setPendingCase(null)
@@ -209,6 +214,20 @@ export default function CasePage() {
         setCheckingPending(false)
       })
   }, [selectedStoreId, config])
+
+  // ปิด dropdown "ทำเคสต่อ" เมื่อคลิกนอกกล่อง
+  useEffect(() => {
+    if (!showMyCasesDropdown) return
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (myCasesRef.current && !myCasesRef.current.contains(e.target as Node)) {
+        setShowMyCasesDropdown(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showMyCasesDropdown])
 
   const handleSearchCaseNumber = async () => {
     if (!config || !searchNumber.trim()) return
@@ -515,42 +534,81 @@ export default function CasePage() {
                       </span>
                     </div>
 
-                    <div className="relative">
-                      <select
-                        defaultValue=""
-                        onChange={(e) => {
-                          if (e.target.value) {
-                            router.push(`/case/${type}/${e.target.value}`)
-                          }
-                        }}
-                        className="
-                          w-full appearance-none rounded-2xl
-                          border border-gray-200 bg-gray-50
-                          px-4 py-3.5 pr-10 text-sm text-gray-700
+                    {/* Custom dropdown แทน native select */}
+                    <div className="relative" ref={myCasesRef}>
+                      <button
+                        type="button"
+                        onClick={() => setShowMyCasesDropdown((v) => !v)}
+                        className={`
+                          flex w-full items-center justify-between gap-3
+                          rounded-2xl border bg-gray-50
+                          px-4 py-3.5 text-sm text-gray-700
                           outline-none transition
-                          focus:bg-white
-                        "
-                        style={{
-                          boxShadow: `0 0 0 2px ${config.accent}00`,
-                        }}
+                          hover:bg-white
+                          ${showMyCasesDropdown
+                            ? 'border-gray-300 bg-white'
+                            : 'border-gray-200'}
+                        `}
                       >
-                        <option value="">
-                          -- เลือกเคสเพื่อทำต่อ --
-                        </option>
+                        <span className="flex items-center gap-2.5 text-gray-500">
+                          <FaClipboardList size={13} className="shrink-0 text-gray-300" />
+                          เลือกเคสเพื่อทำต่อ
+                        </span>
 
-                        {myCases.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.case_number ?? '(ไม่มีเลขเคส)'} ·{' '}
-                            {c.stores?.store_name ?? '-'} · ขั้นตอน{' '}
-                            {c.current_step}/{config.totalSteps}
-                          </option>
-                        ))}
-                      </select>
+                        <FaChevronRight
+                          className={`shrink-0 text-gray-300 transition-transform duration-200 ${
+                            showMyCasesDropdown ? '-rotate-90' : 'rotate-90'
+                          }`}
+                          size={12}
+                        />
+                      </button>
 
-                      <FaChevronRight
-                        className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 rotate-90 text-gray-300"
-                        size={12}
-                      />
+                      {showMyCasesDropdown && (
+                        <div
+                          className="
+                            absolute z-30 mt-2 w-full
+                            overflow-hidden rounded-2xl border border-gray-100
+                            bg-white shadow-xl shadow-gray-900/10
+                          "
+                        >
+                          <div className="max-h-72 overflow-y-auto py-1.5">
+                            {myCases.map((c) => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => {
+                                  setShowMyCasesDropdown(false)
+                                  router.push(`/case/${type}/${c.id}`)
+                                }}
+                                className="
+                                  flex w-full items-center justify-between gap-3
+                                  px-4 py-3 text-left transition
+                                  hover:bg-gray-50
+                                "
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate text-xs font-bold text-gray-800">
+                                    {c.case_number ?? '(ไม่มีเลขเคส)'}
+                                  </p>
+                                  <p className="mt-0.5 truncate text-[11px] text-gray-400">
+                                    {c.stores?.store_name ?? '-'}
+                                  </p>
+                                </div>
+
+                                <span
+                                  className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold"
+                                  style={{
+                                    color: config.accent,
+                                    backgroundColor: `${config.accent}12`,
+                                  }}
+                                >
+                                  {c.current_step}/{config.totalSteps}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                   </div>
