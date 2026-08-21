@@ -122,6 +122,9 @@ export default function CasePage() {
     if (!config) router.push('/select')
   }, [config, router])
 
+  // อ่าน employee จาก localStorage + กัน role head เข้าหน้านี้
+  // (หน้านี้คือหน้าจัดการของ sales/wh/transport/admin เท่านั้น
+  // head มีหน้า /dashboard แยกต่างหากสำหรับดูภาพรวมทุกเคส)
   useEffect(() => {
     const raw = localStorage.getItem('employee')
 
@@ -131,7 +134,12 @@ export default function CasePage() {
     }
 
     try {
-      setEmployee(JSON.parse(raw))
+      const emp = JSON.parse(raw)
+      if (emp.role === 'head') {
+        router.push('/dashboard')
+        return
+      }
+      setEmployee(emp)
     } catch {
       localStorage.removeItem('employee')
       router.push('/login')

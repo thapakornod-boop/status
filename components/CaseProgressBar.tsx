@@ -6,6 +6,8 @@ type Props = {
   type: CaseType
   currentStep: number // 1..7
   status: string // 'in_progress' | 'completed' | 'cancelled'
+  // ชื่อผู้ทำแต่ละ step: key = step number (1 = เลือกร้านค้า, 2..7 = STEPS[type])
+  stepActorNames?: Record<number, string>
 }
 
 // รวม Step 1 + Step 2-7
@@ -23,6 +25,7 @@ export default function CaseProgressBar({
   type,
   currentStep,
   status,
+  stepActorNames = {},
 }: Props) {
   const steps = getFullStepList(type)
   const accent = ACCENT_BY_TYPE[type]
@@ -36,6 +39,12 @@ export default function CaseProgressBar({
   )
 
   const current = steps[safeCurrentStep - 1]
+
+  // ชื่อคนที่ทำ step ก่อนหน้า (คนที่ "ส่งงาน" มาถึงขั้นตอนปัจจุบัน)
+  const previousActorName =
+    !isCompleted && !isCancelled
+      ? stepActorNames[safeCurrentStep - 1]
+      : undefined
 
   const progressPercent =
     isCompleted
@@ -130,6 +139,8 @@ export default function CaseProgressBar({
             const isPending =
               !isDone && !isCurrent
 
+            const actorName = stepActorNames[stepNumber]
+
             return (
               <div
                 key={stepNumber}
@@ -168,6 +179,7 @@ export default function CaseProgressBar({
                           ? `0 3px 8px ${accent}25`
                           : '0 1px 3px rgba(0,0,0,0.06)',
                   }}
+                  title={actorName ? `ทำโดย: ${actorName}` : undefined}
                 >
                   {isDone ? '✓' : stepNumber}
 
@@ -210,6 +222,16 @@ export default function CaseProgressBar({
                   >
                     {step.title}
                   </p>
+
+                  {/* ชื่อผู้ทำ step นี้ (ถ้ามี) */}
+                  {isDone && actorName && (
+                    <p
+                      className="mt-0.5 hidden truncate text-[9px] font-medium text-gray-400 sm:block"
+                      title={`ทำโดย: ${actorName}`}
+                    >
+                      👤 {actorName}
+                    </p>
+                  )}
                 </div>
 
               </div>
@@ -318,6 +340,16 @@ export default function CaseProgressBar({
                   {current?.role}
                 </span>
               </p>
+
+              {/* ใครเป็นคนส่งงานมาถึงขั้นตอนนี้ */}
+              {previousActorName && (
+                <p className="mt-1 text-[11px] text-gray-400">
+                  ส่งต่อมาจาก:{' '}
+                  <span className="font-semibold text-gray-600">
+                    👤 {previousActorName}
+                  </span>
+                </p>
+              )}
             </div>
 
             <div

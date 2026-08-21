@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import CaseProgressBar from '@/components/CaseProgressBar'
+import * as XLSX from 'xlsx'
 
 import {
   TABLE_BY_TYPE,
   ITEMS_TABLE_BY_TYPE,
   TYPE_LABEL,
   STEPS,
+  TOTAL_STEPS,
   CaseType,
   EmployeeRole,
   FieldDef,
@@ -76,6 +78,9 @@ type CaseRow = {
   seller_code: string | null
   transport_name: string | null
   creator_name: string | null
+
+  // step number (string key, e.g. "2","3"...) -> employee_id ของคนที่ทำ step นั้น
+  step_completed_by: Record<string, string> | null
 }
 
 type ItemRow = {
@@ -143,6 +148,81 @@ function formatDate(iso: string) {
       minute: '2-digit',
     })
   )
+}
+
+// ============================================================
+// STUCK INFO (ใครทำล่าสุด / ติดที่แผนกไหน) — สำหรับเคสที่กำลังทำอยู่
+// ============================================================
+
+function getStuckInfo(
+  row: CaseRow,
+  employeesMap: Record<string, string>
+): {
+  roleLabel: string
+  stepTitle: string
+  lastActorName: string
+} | null {
+  if (row.status !== 'in_progress') return null
+
+  // ยังอยู่ step 1 (เลือกร้านค้า) แปลว่ายังไม่มีใครเริ่ม step ถัดไปเลย
+  if (row.current_step <= 1) {
+    return {
+      roleLabel: 'Sales / ขนส่ง (เลือกร้านค้า)',
+      stepTitle: 'เลือกร้านค้า',
+      lastActorName: row.creator_name ?? '-',
+    }
+  }
+
+  const stepDef = STEPS[row.type][row.current_step - 2]
+
+  const lastDoneStep = row.current_step - 1
+
+  const lastActorId =
+    lastDoneStep >= 2
+      ? row.step_completed_by?.[String(lastDoneStep)]
+      : undefined
+
+  const lastActorName =
+    lastDoneStep === 1
+      ? row.creator_name ?? '-'
+      : lastActorId
+        ? employeesMap[lastActorId] ?? '-'
+        : '-'
+
+  return {
+    roleLabel: stepDef?.role ?? '-',
+    stepTitle: stepDef?.title ?? `ขั้นตอน ${row.current_step}`,
+    lastActorName,
+  }
+}
+
+// ============================================================
+// STEP HISTORY (สำหรับ export excel เคสที่สำเร็จ)
+// ============================================================
+
+function buildStepHistory(
+  row: CaseRow,
+  employeesMap: Record<string, string>
+): string {
+  const parts: string[] = []
+
+  parts.push(`Step1 เลือกร้านค้า: ${row.creator_name ?? '-'}`)
+
+  const stepDefs = STEPS[row.type]
+  const total = TOTAL_STEPS[row.type]
+
+  for (let i = 2; i <= total; i++) {
+    const actorId = row.step_completed_by?.[String(i)]
+
+    if (!actorId) continue
+
+    const name = employeesMap[actorId] ?? '-'
+    const title = stepDefs[i - 2]?.title ?? `Step ${i}`
+
+    parts.push(`Step${i} ${title}: ${name}`)
+  }
+
+  return parts.join(' | ')
 }
 
 // ============================================================
@@ -286,6 +366,9 @@ export default function DashboardPage() {
   const [rows, setRows] =
     useState<CaseRow[]>([])
 
+  const [employeesMap, setEmployeesMap] =
+    useState<Record<string, string>>({})
+
   const [loading, setLoading] =
     useState(true)
 
@@ -305,6 +388,9 @@ export default function DashboardPage() {
     useState<ItemRow[]>([])
 
   const [loadingDetail, setLoadingDetail] =
+    useState(false)
+
+  const [exporting, setExporting] =
     useState(false)
 
   // ============================================================
@@ -332,6 +418,30 @@ export default function DashboardPage() {
   }, [router])
 
   // ============================================================
+  // LOAD EMPLOYEES (สำหรับ map employee_id -> ชื่อ)
+  // ============================================================
+
+  useEffect(() => {
+    supabase
+      .from('employees')
+      .select('id, name')
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('โหลดรายชื่อพนักงานไม่สำเร็จ:', error)
+          return
+        }
+
+        const map: Record<string, string> = {}
+
+        for (const e of (data as any[]) ?? []) {
+          map[e.id] = e.name
+        }
+
+        setEmployeesMap(map)
+      })
+  }, [])
+
+  // ============================================================
   // LOAD CASES
   // ============================================================
 
@@ -351,8 +461,8 @@ export default function DashboardPage() {
       for (const type of types) {
         const selectStr =
           type === 'transport'
-            ? 'id, case_number, current_step, status, cn_usage_status, created_at, cancelled_reason, stores(store_code, store_name, seller_code), transport_companies(name), employees:created_by_employee_id(name)'
-            : 'id, case_number, current_step, status, cn_usage_status, created_at, cancelled_reason, stores(store_code, store_name, seller_code), employees:created_by_employee_id(name)'
+            ? 'id, case_number, current_step, status, cn_usage_status, created_at, cancelled_reason, step_completed_by, stores(store_code, store_name, seller_code), transport_companies(name), employees:created_by_employee_id(name)'
+            : 'id, case_number, current_step, status, cn_usage_status, created_at, cancelled_reason, step_completed_by, stores(store_code, store_name, seller_code), employees:created_by_employee_id(name)'
 
         const {
           data,
@@ -394,6 +504,9 @@ export default function DashboardPage() {
 
             cancelled_reason:
               r.cancelled_reason,
+
+            step_completed_by:
+              r.step_completed_by ?? null,
 
             store_code:
               r.stores?.store_code ?? '-',
@@ -577,6 +690,157 @@ export default function DashboardPage() {
     )
 
   // ============================================================
+  // ชื่อผู้ทำแต่ละ step ของเคสที่กำลังเลือกดูอยู่ (สำหรับ CaseProgressBar / step detail)
+  // key = step number (1 = เลือกร้านค้า, 2..7 = ตาม STEPS[type])
+  // ============================================================
+
+  const stepActorNames = useMemo(() => {
+    const map: Record<number, string> = {}
+
+    if (!selectedRow) return map
+
+    if (selectedRow.creator_name) {
+      map[1] = selectedRow.creator_name
+    }
+
+    const scb =
+      (selectedDetail?.step_completed_by as
+        | Record<string, string>
+        | null
+        | undefined) ?? null
+
+    if (scb) {
+      for (const [key, empId] of Object.entries(scb)) {
+        const name = employeesMap[empId]
+
+        if (name) {
+          map[Number(key)] = name
+        }
+      }
+    }
+
+    return map
+  }, [selectedRow, selectedDetail, employeesMap])
+
+  // ============================================================
+  // EXPORT EXCEL
+  // ============================================================
+
+  const handleDownloadReport = () => {
+    if (rows.length === 0) return
+
+    setExporting(true)
+
+    try {
+      const wb = XLSX.utils.book_new()
+
+      const completedRows = rows.filter(
+        (r) => r.status === 'completed'
+      )
+
+      const inProgressRows = rows.filter(
+        (r) => r.status === 'in_progress'
+      )
+
+      const cancelledRows = rows.filter(
+        (r) => r.status === 'cancelled'
+      )
+
+      // -------- สำเร็จ --------
+      const completedSheetData = completedRows.map((r) => ({
+        'ประเภท': TYPE_LABEL[r.type],
+        'เลขเคส': r.case_number ?? '-',
+        'รหัสร้านค้า': r.store_code,
+        'ชื่อร้านค้า': r.store_name,
+        'Seller Code': r.seller_code ?? '-',
+        'ผู้สร้างเคส': r.creator_name ?? '-',
+        'วันที่สร้าง': formatDate(r.created_at),
+        'สถานะ CN': r.cn_usage_status,
+        'ประวัติผู้ดำเนินการ': buildStepHistory(r, employeesMap),
+      }))
+
+      // -------- กำลังดำเนินการ (พร้อมบอกว่าติดที่ใคร/แผนกไหน) --------
+      const inProgressSheetData = inProgressRows.map((r) => {
+        const stuck = getStuckInfo(r, employeesMap)
+
+        return {
+          'ประเภท': TYPE_LABEL[r.type],
+          'เลขเคส': r.case_number ?? '-',
+          'รหัสร้านค้า': r.store_code,
+          'ชื่อร้านค้า': r.store_name,
+          'ผู้สร้างเคส': r.creator_name ?? '-',
+          'ขั้นตอนปัจจุบัน': `${r.current_step}/${TOTAL_STEPS[r.type]}`,
+          'ชื่อขั้นตอน': stuck?.stepTitle ?? '-',
+          'ติดที่แผนก': stuck?.roleLabel ?? '-',
+          'ส่งต่อมาจาก (คนล่าสุดที่ทำ)': stuck?.lastActorName ?? '-',
+          'วันที่สร้าง': formatDate(r.created_at),
+        }
+      })
+
+      // -------- ยกเลิก --------
+      const cancelledSheetData = cancelledRows.map((r) => ({
+        'ประเภท': TYPE_LABEL[r.type],
+        'เลขเคส': r.case_number ?? '-',
+        'รหัสร้านค้า': r.store_code,
+        'ชื่อร้านค้า': r.store_name,
+        'ผู้สร้างเคส': r.creator_name ?? '-',
+        'เหตุผลที่ยกเลิก': r.cancelled_reason ?? '-',
+        'วันที่สร้าง': formatDate(r.created_at),
+      }))
+
+      const wsInProgress = XLSX.utils.json_to_sheet(
+        inProgressSheetData.length > 0
+          ? inProgressSheetData
+          : [{ 'หมายเหตุ': 'ไม่มีเคสที่กำลังดำเนินการ' }]
+      )
+
+      const wsCompleted = XLSX.utils.json_to_sheet(
+        completedSheetData.length > 0
+          ? completedSheetData
+          : [{ 'หมายเหตุ': 'ไม่มีเคสที่สำเร็จ' }]
+      )
+
+      const wsCancelled = XLSX.utils.json_to_sheet(
+        cancelledSheetData.length > 0
+          ? cancelledSheetData
+          : [{ 'หมายเหตุ': 'ไม่มีเคสที่ยกเลิก' }]
+      )
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        wsInProgress,
+        'กำลังดำเนินการ'
+      )
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        wsCompleted,
+        'สำเร็จ'
+      )
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        wsCancelled,
+        'ยกเลิก'
+      )
+
+      const dateStr = new Date()
+        .toISOString()
+        .slice(0, 10)
+
+      XLSX.writeFile(
+        wb,
+        `case-report-${dateStr}.xlsx`
+      )
+    } catch (e) {
+      console.error('Export ไม่สำเร็จ:', e)
+      alert('สร้างรายงานไม่สำเร็จ ลองใหม่อีกครั้งครับ')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  // ============================================================
   // LOADING AUTH
   // ============================================================
 
@@ -723,21 +987,48 @@ export default function DashboardPage() {
               </p>
             </div>
 
-            <div
-              className="inline-flex w-fit items-center gap-2 rounded-full border bg-white px-3 py-2 text-xs font-medium shadow-sm"
-              style={{
-                borderColor: C.border,
-              }}
-            >
-              <span
-                className="h-2 w-2 animate-pulse rounded-full"
-                style={{
-                  backgroundColor:
-                    C.success,
-                }}
-              />
+            <div className="flex flex-wrap items-center gap-2">
 
-              ระบบทำงานปกติ
+              <button
+                type="button"
+                onClick={handleDownloadReport}
+                disabled={
+                  exporting ||
+                  loading ||
+                  rows.length === 0
+                }
+                className="inline-flex w-fit items-center gap-2 rounded-full px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-40"
+                style={{
+                  backgroundColor: C.primary,
+                }}
+              >
+                {exporting ? (
+                  <>
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    กำลังสร้างไฟล์...
+                  </>
+                ) : (
+                  <>⬇ ดาวน์โหลดรายงาน (Excel)</>
+                )}
+              </button>
+
+              <div
+                className="inline-flex w-fit items-center gap-2 rounded-full border bg-white px-3 py-2 text-xs font-medium shadow-sm"
+                style={{
+                  borderColor: C.border,
+                }}
+              >
+                <span
+                  className="h-2 w-2 animate-pulse rounded-full"
+                  style={{
+                    backgroundColor:
+                      C.success,
+                  }}
+                />
+
+                ระบบทำงานปกติ
+              </div>
+
             </div>
 
           </div>
@@ -1101,6 +1392,15 @@ export default function DashboardPage() {
                           ? C.sales
                           : C.transport
 
+                      const stuck =
+                        r.status ===
+                        'in_progress'
+                          ? getStuckInfo(
+                              r,
+                              employeesMap
+                            )
+                          : null
+
                       return (
                         <button
                           key={`${r.type}-${r.id}`}
@@ -1233,6 +1533,18 @@ export default function DashboardPage() {
                                 <div className="mt-1.5 text-[10px] font-medium text-orange-500">
                                   🚚{' '}
                                   {r.transport_name}
+                                </div>
+                              )}
+
+                              {/* ติดที่แผนก / คนล่าสุด (เฉพาะเคสกำลังทำ) */}
+                              {stuck && (
+                                <div className="mt-1.5 inline-flex flex-wrap items-center gap-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-600">
+                                  ⏳ ติดที่: {stuck.roleLabel}
+                                  {stuck.lastActorName !== '-' && (
+                                    <span className="text-amber-500">
+                                      · ส่งมาจาก {stuck.lastActorName}
+                                    </span>
+                                  )}
                                 </div>
                               )}
 
@@ -1532,6 +1844,41 @@ export default function DashboardPage() {
 
                     </div>
 
+                    {/* ติดที่ใคร (เฉพาะเคสกำลังทำ) */}
+
+                    {selectedRow.status === 'in_progress' && (() => {
+                      const stuck = getStuckInfo(selectedRow, employeesMap)
+
+                      if (!stuck) return null
+
+                      return (
+                        <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 p-3">
+
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-amber-500">
+                            กำลังติดอยู่ที่
+                          </p>
+
+                          <p className="mt-1 text-xs leading-5 text-amber-700">
+                            แผนก{' '}
+                            <span className="font-bold">
+                              {stuck.roleLabel}
+                            </span>{' '}
+                            ({stuck.stepTitle})
+                            {stuck.lastActorName !== '-' && (
+                              <>
+                                {' '}
+                                — ส่งต่อมาจาก{' '}
+                                <span className="font-bold">
+                                  {stuck.lastActorName}
+                                </span>
+                              </>
+                            )}
+                          </p>
+
+                        </div>
+                      )
+                    })()}
+
                     {/* Cancel reason */}
 
                     {selectedRow.cancelled_reason && (
@@ -1562,6 +1909,9 @@ export default function DashboardPage() {
                         }
                         status={
                           selectedRow.status
+                        }
+                        stepActorNames={
+                          stepActorNames
                         }
                       />
                     </div>
@@ -1657,6 +2007,16 @@ export default function DashboardPage() {
 
                           </div>
 
+                          {/* ผู้ทำ step 1 */}
+                          {selectedRow.creator_name && (
+                            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-gray-400">
+                              <span>ผู้ทำรายการ:</span>
+                              <span className="font-semibold text-gray-600">
+                                👤 {selectedRow.creator_name}
+                              </span>
+                            </div>
+                          )}
+
                         </div>
 
                         {/* Step 2-7 */}
@@ -1689,6 +2049,11 @@ export default function DashboardPage() {
                               'sales'
                                 ? C.sales
                                 : C.transport
+
+                            const actorName =
+                              stepActorNames[
+                                stepNumber
+                              ]
 
                             return (
                               <div
@@ -1771,6 +2136,16 @@ export default function DashboardPage() {
                                         step.title
                                       }
                                     </p>
+
+                                    {/* ผู้ดำเนินการ step นี้ */}
+                                    {actorName && (
+                                      <p className="mt-0.5 truncate text-[10px] font-medium text-gray-400">
+                                        ผู้ดำเนินการ:{' '}
+                                        <span className="text-gray-600">
+                                          👤 {actorName}
+                                        </span>
+                                      </p>
+                                    )}
 
                                   </div>
 
@@ -1928,6 +2303,7 @@ export default function DashboardPage() {
           </div>
 
         </div>
+
       </main>
     </>
   )

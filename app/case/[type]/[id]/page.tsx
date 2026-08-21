@@ -400,11 +400,21 @@ export default function CaseStepPage() {
       update.updated_at =
         new Date().toISOString()
 
-      update.step_timestamps = {
+       update.step_timestamps = {
         ...(row?.step_timestamps || {}),
         [`step${currentStep}`]:
           new Date().toISOString(),
       }
+
+      // บันทึกว่า step นี้ใครเป็นคนทำ (สำหรับ dashboard / รายงาน)
+ const prevCompleted = typeof row?.step_completed_by === 'object' && row?.step_completed_by !== null
+  ? row.step_completed_by
+  : {}
+
+update.step_completed_by = JSON.parse(JSON.stringify({
+  ...prevCompleted,
+  [String(currentStep)]: employee?.id ?? null,
+}))
 
       if (isLastStep) {
         update.status = 'completed'
